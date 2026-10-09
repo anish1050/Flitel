@@ -97,10 +97,43 @@ export function fieldErrors(error: z.ZodError): Record<string, string> {
 const nothingBookedCodes = new Set([
   "INVALID_BOOKING", "PRICE_CHANGED", "OFFER_UNAVAILABLE", "BOOKING_REJECTED", "BOOKING_FAILED",
   "BOOKINGS_UNAVAILABLE", "DUFFEL_NOT_CONFIGURED", "DUFFEL_UNAVAILABLE", "DUFFEL_TIMEOUT",
-  "DUFFEL_INVALID_RESPONSE", "INVALID_SEARCH", "REQUEST_TOO_LARGE",
+  "DUFFEL_INVALID_RESPONSE", "REQUEST_TOO_LARGE",
 ]);
 
 /** True only when the backend proved no order was attempted or Duffel refused it. */
 export function isNothingBooked(errorCode: string | undefined): boolean {
   return errorCode !== undefined && nothingBookedCodes.has(errorCode);
+}
+
+// Survives a reload so a customer cannot start a second booking while the first outcome is unknown.
+// Holds only the attempt reference, never traveller data.
+// Merely reading window.sessionStorage can throw when site data is blocked.
+export function browserStorage(): Storage | undefined {
+  try {
+    return window.sessionStorage;
+  } catch {
+    return undefined;
+  }
+}
+
+const pendingKey = (offerId: string) => `flitel-booking:${offerId}`;
+
+export function savePendingAttempt(storage: Storage | undefined, offerId: string, attemptId: string) {
+  try {
+    storage?.setItem(pendingKey(offerId), attemptId);
+  } catch {}
+}
+
+export function readPendingAttempt(storage: Storage | undefined, offerId: string): string | undefined {
+  try {
+    return storage?.getItem(pendingKey(offerId)) || undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+export function clearPendingAttempt(storage: Storage | undefined, offerId: string) {
+  try {
+    storage?.removeItem(pendingKey(offerId));
+  } catch {}
 }

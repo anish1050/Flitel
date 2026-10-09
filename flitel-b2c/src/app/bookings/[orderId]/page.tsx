@@ -69,8 +69,8 @@ export default async function BookingConfirmation({
               </span>
             </div>
             <div className="review-list">
-              {booking.travellers.map((traveller) => (
-                <div className="review-row" key={traveller}>
+              {booking.travellers.map((traveller, index) => (
+                <div className="review-row" key={index}>
                   <span>{traveller}</span>
                   <span>Adult</span>
                 </div>

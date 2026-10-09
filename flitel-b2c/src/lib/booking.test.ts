@@ -5,6 +5,9 @@ import {
   createBookingSchema,
   fieldErrors,
   isAdultOn,
+  clearPendingAttempt,
+  readPendingAttempt,
+  savePendingAttempt,
 } from "./booking";
 
 const today = "2026-10-09";
@@ -71,5 +74,34 @@ describe("isNothingBooked", () => {
     expect(isNothingBooked(undefined)).toBe(false);
     expect(isNothingBooked("INTERNAL_ERROR")).toBe(false);
     expect(isNothingBooked("NOT_FOUND")).toBe(false);
+  });
+});
+
+describe("pending attempt storage", () => {
+  const fakeStorage = () => {
+    const items = new Map<string, string>();
+    return {
+      getItem: (key: string) => items.get(key) ?? null,
+      setItem: (key: string, value: string) => void items.set(key, value),
+      removeItem: (key: string) => void items.delete(key),
+    } as Storage;
+  };
+
+  it("saves, reads and clears the attempt reference per offer", () => {
+    const storage = fakeStorage();
+    savePendingAttempt(storage, "off_1", "attempt-1");
+    expect(readPendingAttempt(storage, "off_1")).toBe("attempt-1");
+    expect(readPendingAttempt(storage, "off_2")).toBeUndefined();
+    clearPendingAttempt(storage, "off_1");
+    expect(readPendingAttempt(storage, "off_1")).toBeUndefined();
+  });
+
+  it("never throws when storage is missing or broken", () => {
+    const broken = new Proxy({}, { get: () => () => { throw new Error("blocked"); } }) as Storage;
+    for (const storage of [undefined, broken]) {
+      expect(() => savePendingAttempt(storage, "off_1", "a")).not.toThrow();
+      expect(readPendingAttempt(storage, "off_1")).toBeUndefined();
+      expect(() => clearPendingAttempt(storage, "off_1")).not.toThrow();
+    }
   });
 });

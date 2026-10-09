@@ -255,6 +255,7 @@ app.post("/api/bookings", async (context) => {
   const mismatch = findTravellerMismatch(booking, offer);
   if (mismatch) raiseApiError(400, "INVALID_BOOKING", mismatch);
 
+  // After this claim, never raise an error code the frontend treats as nothing-booked.
   const claimedElsewhere = await claimBookingAttempt({
     _id: booking.attemptId,
     offerId: offer.id,
@@ -287,6 +288,7 @@ app.post("/api/bookings", async (context) => {
       result.message ?? "The airline could not accept these details. Please check them and try again.",
     );
   }
+  // A created order with an unreadable body may exist at Duffel, so it is never recorded as failed.
   await record("unknown");
   return context.json(checkingBooking, 202);
 });

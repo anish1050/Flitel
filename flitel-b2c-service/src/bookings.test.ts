@@ -3,7 +3,7 @@ import app from "./index.js";
 
 const { attempts, mongo } = vi.hoisted(() => ({
   attempts: new Map<string, Record<string, unknown>>(),
-  mongo: { down: false, throwsOnConnect: false },
+  mongo: { down: false, throwsOnConnect: false, hideNextLookup: false, failInsert: false },
 }));
 vi.mock("./mongodb.js", async () => {
   const { MongoServerError } = await import("mongodb");
@@ -14,10 +14,15 @@ vi.mock("./mongodb.js", async () => {
     collection: () => ({
       findOne: async ({ _id }: { _id: string }) => {
         ensureUp();
+        if (mongo.hideNextLookup) {
+          mongo.hideNextLookup = false;
+          return null;
+        }
         return attempts.get(_id) ?? null;
       },
       insertOne: async (document: { _id: string }) => {
         ensureUp();
+        if (mongo.failInsert) throw new Error("write concern failure");
         if (attempts.has(document._id))
           throw new MongoServerError({ message: "duplicate key", code: 11000 });
         attempts.set(document._id, { ...document });
@@ -108,6 +113,8 @@ beforeEach(() => {
   attempts.clear();
   mongo.down = false;
   mongo.throwsOnConnect = false;
+  mongo.hideNextLookup = false;
+  mongo.failInsert = false;
   vi.useFakeTimers({ toFake: ["Date"] });
   vi.setSystemTime(new Date("2026-09-30T12:00:00Z"));
   vi.stubEnv("DUFFEL_ACCESS_TOKEN", "duffel_test_example");
@@ -129,6 +136,7 @@ describe("booking API", () => {
     expect(JSON.parse(String(orderCalls()[0][1]!.body)).data).toEqual({
       type: "instant",
       selected_offers: ["off_example_123"],
+      metadata: { attempt_id: request.attemptId },
       payments: [{ type: "balance", amount: "550.25", currency: "GBP" }],
       passengers: [
         {
@@ -255,6 +263,41 @@ describe("booking API", () => {
         ),
     });
     expect((await placeBooking(booking())).status).toBe(410);
+  });
+
+  it("treats a lost claim race as checking and never orders", async () => {
+    duffelReplies();
+    const request = booking();
+    attempts.set(request.attemptId, { _id: request.attemptId, status: "pending" });
+    mongo.hideNextLookup = true;
+    const response = await placeBooking(request);
+    expect(response.status).toBe(202);
+    expect(await response.json()).toEqual({ data: { status: "checking" } });
+    expect(orderCalls()).toHaveLength(0);
+  });
+
+  it("books nothing when the claim write fails", async () => {
+    duffelReplies();
+    mongo.failInsert = true;
+    const response = await placeBooking(booking());
+    expect(response.status).toBe(503);
+    expect((await response.json()).error.code).toBe("BOOKINGS_UNAVAILABLE");
+    expect(orderCalls()).toHaveLength(0);
+  });
+
+  it("shows Duffel's text only for 422 rejections", async () => {
+    duffelReplies({
+      order: () =>
+        Response.json(
+          { errors: [{ code: "insufficient_balance", message: "Balance is 0.00" }] },
+          { status: 403 },
+        ),
+    });
+    const response = await placeBooking(booking());
+    expect(response.status).toBe(422);
+    expect((await response.json()).error.message).toBe(
+      "The airline could not accept these details. Please check them and try again.",
+    );
   });
 
   it("books nothing while the database is unavailable", async () => {

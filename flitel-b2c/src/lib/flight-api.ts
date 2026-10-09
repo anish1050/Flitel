@@ -157,7 +157,7 @@ export async function createBooking(
       headers: { Accept: "application/json", "Content-Type": "application/json" },
       body: JSON.stringify(input),
       cache: "no-store",
-      signal: AbortSignal.timeout(75_000),
+      signal: AbortSignal.timeout(85_000),
     });
     return { status: response.status, body: await response.json().catch(() => null) };
   } catch {

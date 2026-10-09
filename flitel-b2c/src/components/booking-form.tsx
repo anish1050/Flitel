@@ -3,7 +3,7 @@
 import { ArrowRight, Info } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { z } from "zod";
 import {
   CheckingPanel,
@@ -15,7 +15,11 @@ import {
   createBookingInput,
   createBookingSchema,
   fieldErrors,
+  browserStorage,
+  clearPendingAttempt,
   isNothingBooked,
+  readPendingAttempt,
+  savePendingAttempt,
   type BookingDetails,
   type BookingInput,
 } from "@/lib/booking";
@@ -58,6 +62,7 @@ export function BookingForm({
     createBookingInput(offer.passengerIds, offer.identityDocumentsRequired),
   );
   const [errors, setErrors] = useState<Record<string, string>>({});
+  // Server render has no sessionStorage, so a reload mid-booking starts in "checking" only after hydration.
   const [step, setStep] = useState<"edit" | "review" | "checking">("edit");
   const [details, setDetails] = useState<BookingDetails>();
   const [total, setTotal] = useState({ amount: offer.totalAmount, currency: offer.currency });
@@ -69,6 +74,13 @@ export function BookingForm({
   const submitting = useRef(false);
   const rulesCheckbox = useRef<HTMLInputElement>(null);
   const travellerCount = offer.passengerIds.length;
+
+  useEffect(() => {
+    const pending = readPendingAttempt(browserStorage(), offer.id);
+    if (!pending) return;
+    setAttemptId(pending);
+    setStep("checking");
+  }, [offer.id]);
 
   function updateTraveller(index: number, changes: Partial<BookingInput["travellers"][number]>) {
     setInput((current) => ({
@@ -130,6 +142,7 @@ export function BookingForm({
     submitting.current = true;
     setBusy(true);
     setProblem(undefined);
+    savePendingAttempt(browserStorage(), offer.id, attemptId);
     const response = await fetch("/api/bookings", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -154,6 +167,7 @@ export function BookingForm({
       setStep("checking");
       return;
     }
+    clearPendingAttempt(browserStorage(), offer.id);
     submitting.current = false;
     setBusy(false);
     setAttemptId(crypto.randomUUID());

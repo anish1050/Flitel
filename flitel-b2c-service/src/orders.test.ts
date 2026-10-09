@@ -85,6 +85,7 @@ describe("Duffel order body", () => {
     ).toEqual({
       type: "instant",
       selected_offers: ["off_example_123"],
+      metadata: { attempt_id: "3b241101-e2bb-4255-8caf-4136c566a962" },
       payments: [{ type: "balance", amount: "600.00", currency: "GBP" }],
       passengers: [
         {

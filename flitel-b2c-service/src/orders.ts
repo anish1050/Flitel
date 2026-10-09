@@ -67,6 +67,7 @@ export function buildDuffelOrder(request: BookingRequest, offer: FlightOffer) {
   return {
     type: "instant",
     selected_offers: [offer.id],
+    metadata: { attempt_id: request.attemptId },
     payments: [
       { type: "balance", amount: offer.total_amount, currency: offer.total_currency },
     ],

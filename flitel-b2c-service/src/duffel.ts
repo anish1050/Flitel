@@ -182,8 +182,10 @@ export async function placeDuffelOrder(
     codes: errors.success
       ? errors.data.errors.flatMap((error) => (error.code ? [error.code] : []))
       : [],
-    message: errors.success
-      ? errors.data.errors.find((error) => error.message)?.message
-      : undefined,
+    // Only a 422 carries validation text meant for the customer; 401/403/429 messages are internal.
+    message:
+      response.status === 422 && errors.success
+        ? errors.data.errors.find((error) => error.message)?.message
+        : undefined,
   };
 }
