@@ -14,7 +14,7 @@ export const amountSchema = z
   .regex(/^\d+(?:\.\d+)?$/)
   .refine((amount) => Number.isFinite(Number(amount)));
 export const currencySchema = z.string().regex(/^[A-Z]{3}$/);
-const conditionSchema = z
+export const conditionSchema = z
   .object({
     allowed: z.boolean(),
     penalty_amount: amountSchema.nullish(),

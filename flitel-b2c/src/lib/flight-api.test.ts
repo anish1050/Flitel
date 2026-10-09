@@ -5,8 +5,10 @@ import {
   fetchBooking,
   fetchFlightOffers,
   fetchFlightOffer,
+  refreshSupplierOffer,
   streamFlightOffers,
 } from "./flight-api";
+import { supplierOffer } from "./duffel-offer.fixture";
 import { createDefaultSearch } from "./flights";
 
 afterEach(() => {
@@ -113,6 +115,48 @@ describe("flight backend connection", () => {
     await expect(
       fetchFlightOffer("off_test123", createDefaultSearch()),
     ).rejects.toThrow(/expired/);
+  });
+});
+
+describe("refreshing a supplier offer", () => {
+  const search = createDefaultSearch();
+
+  it("posts the search and returns the same flight's new offer", async () => {
+    vi.stubEnv("FLITEL_API_URL", "http://127.0.0.1:3001");
+    const request = vi
+      .fn()
+      .mockResolvedValue(Response.json({ data: { ...supplierOffer, id: "off_new" } }));
+    vi.stubGlobal("fetch", request);
+    expect((await refreshSupplierOffer("off_old", search))?.id).toBe("off_new");
+    expect(request).toHaveBeenCalledWith(
+      "http://127.0.0.1:3001/api/flights/offers/off_old/refresh",
+      expect.objectContaining({ method: "POST", cache: "no-store", body: JSON.stringify(search) }),
+    );
+  });
+
+  it("answers undefined when the flight is gone", async () => {
+    vi.stubEnv("FLITEL_API_URL", "http://127.0.0.1:3001");
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        Response.json({ error: { code: "OFFER_UNAVAILABLE", message: "gone" } }, { status: 404 }),
+      ),
+    );
+    expect(await refreshSupplierOffer("off_old", search)).toBeUndefined();
+  });
+
+  it("fails with a customer-safe message when the backend errors", async () => {
+    vi.stubEnv("FLITEL_API_URL", "http://127.0.0.1:3001");
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(Response.json({}, { status: 502 })));
+    await expect(refreshSupplierOffer("off_old", search)).rejects.toThrow(/could not be refreshed/);
+  });
+
+  it("never fetches for a malformed id", async () => {
+    vi.stubEnv("FLITEL_API_URL", "http://127.0.0.1:3001");
+    const request = vi.fn();
+    vi.stubGlobal("fetch", request);
+    await expect(refreshSupplierOffer("../bookings", search)).rejects.toThrow();
+    expect(request).not.toHaveBeenCalled();
   });
 });
 

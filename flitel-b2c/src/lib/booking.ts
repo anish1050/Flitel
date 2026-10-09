@@ -1,4 +1,39 @@
 import { z } from "zod";
+import { conditionSchema } from "./duffel-offers";
+import type { FlightOffer } from "./flights";
+
+export const bookableOfferSchema = z.object({
+  id: z.string(),
+  totalAmount: z.string(),
+  currency: z.string(),
+  passengerIds: z.array(z.string()),
+  identityDocumentsRequired: z.boolean(),
+  refundCondition: conditionSchema,
+  changeCondition: conditionSchema,
+});
+export type BookableOffer = z.infer<typeof bookableOfferSchema>;
+
+export function toBookableOffer(offer: FlightOffer): BookableOffer | undefined {
+  if (!offer.slices || !offer.totalAmount || !offer.passengerIds) return undefined;
+  return {
+    id: offer.id,
+    totalAmount: offer.totalAmount,
+    currency: offer.currency,
+    passengerIds: offer.passengerIds,
+    identityDocumentsRequired: offer.identityDocumentsRequired ?? false,
+    refundCondition: offer.refundCondition,
+    changeCondition: offer.changeCondition,
+  };
+}
+
+/** Moves typed-in travellers onto a refreshed offer's passenger ids; undefined when the party size changed. */
+export function remapTravellers<T extends { id: string }>(
+  travellers: T[],
+  passengerIds: string[],
+): T[] | undefined {
+  if (travellers.length !== passengerIds.length) return undefined;
+  return travellers.map((traveller, index) => ({ ...traveller, id: passengerIds[index] }));
+}
 
 export type TravellerInput = {
   id: string;

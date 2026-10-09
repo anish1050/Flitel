@@ -141,6 +141,24 @@ export async function fetchSupplierOffer(id: string): Promise<FlightOffer> {
   return parseDuffelOffer(response.data.data);
 }
 
+export async function refreshSupplierOffer(
+  id: string,
+  search: FlightSearch,
+): Promise<FlightOffer | undefined> {
+  if (!/^off_[A-Za-z0-9_]+$/.test(id)) throw new Error("This fare cannot be refreshed.");
+  const response = await fetch(`${backendUrl()}/api/flights/offers/${id}/refresh`, {
+    method: "POST",
+    headers: { Accept: "application/json", "Content-Type": "application/json" },
+    body: JSON.stringify(search),
+    cache: "no-store",
+    signal: AbortSignal.timeout(25_000),
+  }).catch(() => undefined);
+  if (response?.status === 404) return undefined;
+  const body = z.object({ data: z.unknown() }).safeParse(await response?.json().catch(() => null));
+  if (!response?.ok || !body.success) throw new Error("The fare could not be refreshed. Please try again shortly.");
+  return parseDuffelOffer(body.data.data);
+}
+
 const checkingBooking = { status: 202, body: { data: { status: "checking" } } };
 
 export async function createBooking(

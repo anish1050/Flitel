@@ -12,6 +12,7 @@ import {
   TravellerFields,
 } from "@/components/booking-panels";
 import {
+  bookableOfferSchema,
   createBookingInput,
   createBookingSchema,
   fieldErrors,
@@ -19,44 +20,43 @@ import {
   clearPendingAttempt,
   isNothingBooked,
   readPendingAttempt,
+  remapTravellers,
   savePendingAttempt,
+  type BookableOffer,
   type BookingDetails,
   type BookingInput,
 } from "@/lib/booking";
-import type { FareCondition } from "@/lib/duffel-offers";
-import { formatPrice } from "@/lib/flights";
-
-export type BookableOffer = {
-  id: string;
-  totalAmount: string;
-  currency: string;
-  passengerIds: string[];
-  identityDocumentsRequired: boolean;
-  refundCondition: FareCondition;
-  changeCondition: FareCondition;
-};
+import { formatPrice, type FlightSearch } from "@/lib/flights";
 
 const latestPriceSchema = z.object({
   data: z.object({ totalAmount: z.string(), currency: z.string() }),
 });
+const flightGone = "This flight is no longer available. Please search again.";
+const refreshedOfferSchema = z.object({ data: bookableOfferSchema });
+const emptyPassport = { number: "", issuingCountry: "", expiresOn: "" };
 const bookingAnswerSchema = z.object({
   data: z.object({ orderId: z.string() }).optional(),
   error: z.object({ code: z.string().optional(), message: z.string() }).optional(),
 });
 
 export function BookingForm({
-  offer,
+  offer: initialOffer,
+  search,
+  initialNotice,
   route,
   tripLabel,
   searchHref,
 }: {
   offer: BookableOffer;
+  search: FlightSearch;
+  initialNotice?: string;
   route: { from: string; to: string };
   tripLabel: string;
   searchHref: string;
 }) {
   const router = useRouter();
   const today = new Date().toLocaleDateString("en-CA");
+  const [offer, setOffer] = useState(initialOffer);
   const schema = createBookingSchema(offer.identityDocumentsRequired, today);
   const [input, setInput] = useState<BookingInput>(() =>
     createBookingInput(offer.passengerIds, offer.identityDocumentsRequired),
@@ -66,12 +66,14 @@ export function BookingForm({
   const [step, setStep] = useState<"edit" | "review" | "checking">("edit");
   const [details, setDetails] = useState<BookingDetails>();
   const [total, setTotal] = useState({ amount: offer.totalAmount, currency: offer.currency });
-  const [priceNotice, setPriceNotice] = useState<string>();
+  const [priceNotice, setPriceNotice] = useState(initialNotice);
   const [problem, setProblem] = useState<{ message: string; searchAgain: boolean }>();
   const [busy, setBusy] = useState(false);
   const [acceptedRules, setAcceptedRules] = useState(false);
   const [attemptId, setAttemptId] = useState("");
   const submitting = useRef(false);
+  // True once a Confirm has swapped in a fresh fare, so a second rejection is final.
+  const confirmRefreshedFare = useRef(false);
   const rulesCheckbox = useRef<HTMLInputElement>(null);
   const travellerCount = offer.passengerIds.length;
 
@@ -115,6 +117,40 @@ export function BookingForm({
     return true;
   }
 
+  /** Swaps in the same flight's current offer. Returns it when the form can go on with it. */
+  async function refreshFare(): Promise<BookableOffer | undefined> {
+    const response = await fetch(`/api/flights/offers/${encodeURIComponent(offer.id)}/refresh`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(search),
+      cache: "no-store",
+    }).catch(() => undefined);
+    const next = refreshedOfferSchema.safeParse(await response?.json().catch(() => null)).data?.data;
+    const travellers = next && remapTravellers(input.travellers, next.passengerIds);
+    const reviewed = next && details && remapTravellers(details.travellers, next.passengerIds);
+    if (!next || !travellers || (details && !reviewed)) {
+      setProblem({ message: flightGone, searchAgain: true });
+      return undefined;
+    }
+    clearPendingAttempt(browserStorage(), offer.id);
+    const needsPassports = next.identityDocumentsRequired && !offer.identityDocumentsRequired;
+    setOffer(next);
+    setTotal({ amount: next.totalAmount, currency: next.currency });
+    setInput({
+      ...input,
+      travellers: needsPassports
+        ? travellers.map((traveller) => ({ ...traveller, passport: emptyPassport }))
+        : travellers,
+    });
+    if (details && reviewed) setDetails({ ...details, travellers: reviewed });
+    setAcceptedRules(false);
+    setAttemptId(crypto.randomUUID());
+    setProblem(undefined);
+    setPriceNotice(refreshNotice(total, next, needsPassports));
+    if (needsPassports) setStep("edit");
+    return needsPassports ? undefined : next;
+  }
+
   async function review() {
     const parsed = schema.safeParse(input);
     if (!parsed.success) {
@@ -127,10 +163,12 @@ export function BookingForm({
     setErrors({});
     setProblem(undefined);
     setBusy(true);
-    const priceKnown = await recheckPrice();
+    confirmRefreshedFare.current = false;
+    const current = (await recheckPrice()) ? offer : await refreshFare();
     setBusy(false);
-    if (!priceKnown) return;
-    setDetails(parsed.data);
+    if (!current) return;
+    const travellers = remapTravellers(parsed.data.travellers, current.passengerIds);
+    setDetails({ ...parsed.data, travellers: travellers ?? parsed.data.travellers });
     setAttemptId(crypto.randomUUID());
     setAcceptedRules(false);
     setStep("review");
@@ -168,19 +206,27 @@ export function BookingForm({
       return;
     }
     clearPendingAttempt(browserStorage(), offer.id);
+    const refreshing = errorCode === "OFFER_UNAVAILABLE" && !confirmRefreshedFare.current;
+    if (refreshing) {
+      confirmRefreshedFare.current = true;
+      await refreshFare();
+    }
     submitting.current = false;
     setBusy(false);
     setAttemptId(crypto.randomUUID());
+    if (refreshing) return;
     if (errorCode === "PRICE_CHANGED") {
       setAcceptedRules(false);
       await recheckPrice();
       return;
     }
+    const unavailable = errorCode === "OFFER_UNAVAILABLE";
     setProblem({
-      message:
-        answer.data?.error?.message ??
-        "This booking could not be completed and nothing was booked. Please try again.",
-      searchAgain: errorCode === "OFFER_UNAVAILABLE",
+      message: unavailable
+        ? flightGone
+        : (answer.data?.error?.message ??
+          "This booking could not be completed and nothing was booked. Please try again."),
+      searchAgain: unavailable,
     });
   }
 
@@ -296,4 +342,17 @@ export function BookingForm({
       </aside>
     </div>
   );
+}
+
+function refreshNotice(
+  old: { amount: string; currency: string },
+  next: BookableOffer,
+  needsPassports: boolean,
+): string {
+  const samePrice = old.amount === next.totalAmount && old.currency === next.currency;
+  const price = (amount: string, currency: string) => formatPrice(Number(amount), currency);
+  const change = samePrice
+    ? "This fare was refreshed at the same price."
+    : `This fare was refreshed: ${price(old.amount, old.currency)} → ${price(next.totalAmount, next.currency)}. Please check the new total.`;
+  return needsPassports ? `${change} Passport details are now required for this fare.` : change;
 }

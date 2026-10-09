@@ -7,8 +7,12 @@ import {
   isAdultOn,
   clearPendingAttempt,
   readPendingAttempt,
+  remapTravellers,
   savePendingAttempt,
+  toBookableOffer,
 } from "./booking";
+import { parseDuffelOffer } from "./duffel-offers";
+import { supplierOffer } from "./duffel-offer.fixture";
 
 const today = "2026-10-09";
 const filled = (documentsRequired = false) => {
@@ -103,5 +107,38 @@ describe("pending attempt storage", () => {
       expect(readPendingAttempt(storage, "off_1")).toBeUndefined();
       expect(() => clearPendingAttempt(storage, "off_1")).not.toThrow();
     }
+  });
+});
+
+describe("toBookableOffer", () => {
+  it("keeps only what the booking form needs", () => {
+    const offer = toBookableOffer(parseDuffelOffer(supplierOffer));
+    expect(offer).toMatchObject({
+      id: supplierOffer.id,
+      totalAmount: supplierOffer.total_amount,
+      currency: supplierOffer.total_currency,
+    });
+    expect(offer?.passengerIds.length).toBeGreaterThan(0);
+  });
+
+  it("is undefined when the offer lacks booking data", () => {
+    expect(toBookableOffer({ ...parseDuffelOffer(supplierOffer), passengerIds: undefined })).toBeUndefined();
+    expect(toBookableOffer({ ...parseDuffelOffer(supplierOffer), slices: undefined })).toBeUndefined();
+    expect(toBookableOffer({ ...parseDuffelOffer(supplierOffer), totalAmount: undefined })).toBeUndefined();
+  });
+});
+
+describe("remapTravellers", () => {
+  const travellers = [{ id: "pas_1", name: "a" }, { id: "pas_2", name: "b" }];
+
+  it("moves travellers onto the new passenger ids in order", () => {
+    expect(remapTravellers(travellers, ["pas_x", "pas_y"])).toEqual([
+      { id: "pas_x", name: "a" },
+      { id: "pas_y", name: "b" },
+    ]);
+  });
+
+  it("refuses when the passenger count differs", () => {
+    expect(remapTravellers(travellers, ["pas_x"])).toBeUndefined();
   });
 });
