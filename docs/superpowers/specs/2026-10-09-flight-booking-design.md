@@ -48,12 +48,21 @@ These rules apply in test mode now so the flow is already correct when real mone
 
 Sources: Duffel quick start (latest offer price before ordering; payment amount matches `total_amount`), Duffel card payments guide (3D Secure session must be `ready_for_payment`), Duffel hold-orders guide, Spotnana air ticketing lifecycle (authorise at booking, ticket later), RBI TAT circular for failed transactions.
 
+## Refreshing an unavailable fare
+
+Duffel offers lapse (about 30 minutes) and can become unavailable before that (`offer_no_longer_available`, e.g. the airline's inventory moved). Instead of sending the customer back to search, Flitel looks for the same flight again.
+
+- Backend `POST /api/flights/offers/:id/refresh` with the search criteria as the body. It reads the original offer from Duffel (Duffel still returns lapsed offers), runs a fresh, uncached search, and returns the offer for the same flight: every segment's marketing carrier, flight number and departure time must match, the currency must match, and the id must differ. When several fares match, it picks the one with the same fare brand name (`slices[].fare_brand_name`), otherwise the cheapest. No match → `404 OFFER_UNAVAILABLE` "This flight is no longer available. Please search again."
+- The book page refreshes when the offer cannot be loaded, when the review price check fails, and when Confirm answers `OFFER_UNAVAILABLE`. It swaps in the new offer (id, total, fare rules, passport requirement), maps the travellers onto the new offer's passenger ids in order, keeps everything typed, clears the fare-rules checkbox, uses a fresh attemptId and shows "This fare was refreshed: <old> → <new>. Please check the new total." If passports become required it returns to the edit step to collect them.
+- A fare is refreshed automatically at most once per Confirm: if the refreshed offer is also unavailable, the customer sees "This flight is no longer available" with the search link.
+- Duffel's `offer_no_longer_available` is described as "no longer available", never "expired".
+
 ## Errors
 
 | Case | Response | Customer sees |
 | --- | --- | --- |
 | Invalid field | inline, before any request | Message next to the field |
-| Offer expired | `410 OFFER_UNAVAILABLE` | "This fare has expired" + search again |
+| Offer expired or no longer available | `410 OFFER_UNAVAILABLE` | Fare refreshed for the same flight with the new total; only if that flight is gone: "This flight is no longer available" + search again |
 | Price changed | `409 PRICE_CHANGED` | New total highlighted on review; confirm again |
 | Duffel rejects passenger data | `422` with Duffel's field message | Message on review; details kept |
 | Supplier down before ordering (offer fetch fails) | `502/503` | "Nothing was booked. Please try again." |
