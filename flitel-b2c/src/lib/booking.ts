@@ -13,6 +13,21 @@ export const bookableOfferSchema = z.object({
 });
 export type BookableOffer = z.infer<typeof bookableOfferSchema>;
 
+export type RefreshResult =
+  | { kind: "found"; offer: BookableOffer }
+  | { kind: "gone" }
+  | { kind: "failed" };
+
+const unavailableAnswerSchema = z.object({ error: z.object({ code: z.literal("OFFER_UNAVAILABLE") }) });
+
+/** Only the backend's 404 OFFER_UNAVAILABLE proves the flight is gone; anything else may be an outage. */
+export function classifyRefreshResponse(status: number | undefined, body: unknown): RefreshResult {
+  const found = z.object({ data: bookableOfferSchema }).safeParse(body);
+  if (status === 200 && found.success) return { kind: "found", offer: found.data.data };
+  if (status === 404 && unavailableAnswerSchema.safeParse(body).success) return { kind: "gone" };
+  return { kind: "failed" };
+}
+
 export function toBookableOffer(offer: FlightOffer): BookableOffer | undefined {
   if (!offer.slices || !offer.totalAmount || !offer.passengerIds) return undefined;
   return {

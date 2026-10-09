@@ -12,7 +12,7 @@ import {
   TravellerFields,
 } from "@/components/booking-panels";
 import {
-  bookableOfferSchema,
+  classifyRefreshResponse,
   createBookingInput,
   createBookingSchema,
   fieldErrors,
@@ -23,6 +23,7 @@ import {
   remapTravellers,
   savePendingAttempt,
   type BookableOffer,
+  type RefreshResult,
   type BookingDetails,
   type BookingInput,
 } from "@/lib/booking";
@@ -32,7 +33,7 @@ const latestPriceSchema = z.object({
   data: z.object({ totalAmount: z.string(), currency: z.string() }),
 });
 const flightGone = "This flight is no longer available. Please search again.";
-const refreshedOfferSchema = z.object({ data: bookableOfferSchema });
+const refreshFailed = "We couldn’t refresh this fare right now. Nothing was booked. Please try again.";
 const emptyPassport = { number: "", issuingCountry: "", expiresOn: "" };
 const bookingAnswerSchema = z.object({
   data: z.object({ orderId: z.string() }).optional(),
@@ -77,6 +78,13 @@ export function BookingForm({
   const rulesCheckbox = useRef<HTMLInputElement>(null);
   const travellerCount = offer.passengerIds.length;
 
+  // A reload must land on the refreshed offer so its pending attempt is found.
+  useEffect(() => {
+    const path = `/flights/${encodeURIComponent(offer.id)}/book`;
+    if (window.location.pathname !== path)
+      window.history.replaceState(null, "", path + window.location.search);
+  }, [offer.id]);
+
   useEffect(() => {
     const pending = readPendingAttempt(browserStorage(), offer.id);
     if (!pending) return;
@@ -117,38 +125,59 @@ export function BookingForm({
     return true;
   }
 
-  /** Swaps in the same flight's current offer. Returns it when the form can go on with it. */
-  async function refreshFare(): Promise<BookableOffer | undefined> {
+  async function requestRefreshedFare(): Promise<RefreshResult> {
     const response = await fetch(`/api/flights/offers/${encodeURIComponent(offer.id)}/refresh`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(search),
       cache: "no-store",
     }).catch(() => undefined);
-    const next = refreshedOfferSchema.safeParse(await response?.json().catch(() => null)).data?.data;
-    const travellers = next && remapTravellers(input.travellers, next.passengerIds);
-    const reviewed = next && details && remapTravellers(details.travellers, next.passengerIds);
-    if (!next || !travellers || (details && !reviewed)) {
+    return classifyRefreshResponse(response?.status, await response?.json().catch(() => null));
+  }
+
+  /** Swaps in the same flight's current offer. Returns it when the form can go on with it. */
+  async function refreshFare(): Promise<BookableOffer | undefined> {
+    const result = await requestRefreshedFare();
+    if (result.kind === "failed") {
+      setProblem({ message: refreshFailed, searchAgain: false });
+      return undefined;
+    }
+    // A changed party size cannot be mapped onto the new offer, so treat that flight as gone.
+    if (result.kind === "gone" || !remapTravellers(input.travellers, result.offer.passengerIds)) {
       setProblem({ message: flightGone, searchAgain: true });
       return undefined;
     }
+    return applyRefreshedFare(result.offer);
+  }
+
+  function applyRefreshedFare(next: BookableOffer): BookableOffer | undefined {
     clearPendingAttempt(browserStorage(), offer.id);
     const needsPassports = next.identityDocumentsRequired && !offer.identityDocumentsRequired;
+    // Party size is fixed while typing and was checked in refreshFare, so the remaps always succeed.
+    const remap = <T extends { id: string }>(travellers: T[]) =>
+      remapTravellers(travellers, next.passengerIds)!;
     setOffer(next);
     setTotal({ amount: next.totalAmount, currency: next.currency });
-    setInput({
-      ...input,
-      travellers: needsPassports
-        ? travellers.map((traveller) => ({ ...traveller, passport: emptyPassport }))
-        : travellers,
-    });
-    if (details && reviewed) setDetails({ ...details, travellers: reviewed });
+    setInput((current) => ({
+      ...current,
+      travellers: remap(current.travellers).map((traveller) =>
+        needsPassports ? { ...traveller, passport: emptyPassport } : traveller,
+      ),
+    }));
+    setDetails((current) => current && { ...current, travellers: remap(current.travellers) });
     setAcceptedRules(false);
-    setAttemptId(crypto.randomUUID());
     setProblem(undefined);
     setPriceNotice(refreshNotice(total, next, needsPassports));
     if (needsPassports) setStep("edit");
     return needsPassports ? undefined : next;
+  }
+
+  /** Confirm gets one automatic refresh; returns whether it tried one. */
+  async function refreshAfterUnavailable(errorCode: string | undefined): Promise<boolean> {
+    if (errorCode !== "OFFER_UNAVAILABLE" || confirmRefreshedFare.current) return false;
+    if (await refreshFare()) confirmRefreshedFare.current = true;
+    setAcceptedRules(false);
+    return true;
   }
 
   async function review() {
@@ -168,7 +197,8 @@ export function BookingForm({
     setBusy(false);
     if (!current) return;
     const travellers = remapTravellers(parsed.data.travellers, current.passengerIds);
-    setDetails({ ...parsed.data, travellers: travellers ?? parsed.data.travellers });
+    if (!travellers) return;
+    setDetails({ ...parsed.data, travellers });
     setAttemptId(crypto.randomUUID());
     setAcceptedRules(false);
     setStep("review");
@@ -206,11 +236,7 @@ export function BookingForm({
       return;
     }
     clearPendingAttempt(browserStorage(), offer.id);
-    const refreshing = errorCode === "OFFER_UNAVAILABLE" && !confirmRefreshedFare.current;
-    if (refreshing) {
-      confirmRefreshedFare.current = true;
-      await refreshFare();
-    }
+    const refreshing = await refreshAfterUnavailable(errorCode);
     submitting.current = false;
     setBusy(false);
     setAttemptId(crypto.randomUUID());

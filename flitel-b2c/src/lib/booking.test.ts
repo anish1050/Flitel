@@ -5,6 +5,7 @@ import {
   createBookingSchema,
   fieldErrors,
   isAdultOn,
+  classifyRefreshResponse,
   clearPendingAttempt,
   readPendingAttempt,
   remapTravellers,
@@ -140,5 +141,25 @@ describe("remapTravellers", () => {
 
   it("refuses when the passenger count differs", () => {
     expect(remapTravellers(travellers, ["pas_x"])).toBeUndefined();
+  });
+});
+
+describe("classifyRefreshResponse", () => {
+  const offer = toBookableOffer(parseDuffelOffer(supplierOffer))!;
+
+  it("finds the refreshed offer", () => {
+    expect(classifyRefreshResponse(200, { data: offer })).toEqual({ kind: "found", offer });
+  });
+
+  it("calls the flight gone only for a 404 OFFER_UNAVAILABLE", () => {
+    const body = { error: { code: "OFFER_UNAVAILABLE", message: "gone" } };
+    expect(classifyRefreshResponse(404, body)).toEqual({ kind: "gone" });
+  });
+
+  it("treats outages, odd bodies and network errors as failures", () => {
+    expect(classifyRefreshResponse(502, { error: { message: "down" } })).toEqual({ kind: "failed" });
+    expect(classifyRefreshResponse(404, null)).toEqual({ kind: "failed" });
+    expect(classifyRefreshResponse(200, { data: {} })).toEqual({ kind: "failed" });
+    expect(classifyRefreshResponse(undefined, null)).toEqual({ kind: "failed" });
   });
 });

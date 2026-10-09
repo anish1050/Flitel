@@ -2,20 +2,30 @@ import type { Metadata } from "next";
 import { ArrowLeft, Info } from "lucide-react";
 import { BookingForm } from "@/components/booking-form";
 import { FlightLink } from "@/components/flight-transition";
-import { toBookableOffer } from "@/lib/booking";
+import { toBookableOffer, type BookableOffer } from "@/lib/booking";
 import { fetchFlightOffer, hasFlightBackend, refreshSupplierOffer } from "@/lib/flight-api";
 import { buildSearchQuery, findAirport, parseSearchParams, type FlightOffer, type FlightSearch } from "@/lib/flights";
 
 export const metadata: Metadata = { title: "Traveller details" };
 
-async function loadBookableOffer(id: string, search: FlightSearch) {
+type LoadedOffer =
+  | { kind: "found"; offer: FlightOffer; bookable: BookableOffer; refreshed: boolean }
+  | { kind: "gone" }
+  | { kind: "failed" };
+
+async function loadBookableOffer(id: string, search: FlightSearch): Promise<LoadedOffer> {
   const loaded = await fetchFlightOffer(id, search).catch(() => undefined);
   const loadedBookable = loaded && toBookableOffer(loaded);
-  if (loaded && loadedBookable) return { offer: loaded, bookable: loadedBookable, refreshed: false };
-  if (!hasFlightBackend()) return undefined;
-  const offer: FlightOffer | undefined = await refreshSupplierOffer(id, search).catch(() => undefined);
-  const bookable = offer && toBookableOffer(offer);
-  return offer && bookable ? { offer, bookable, refreshed: true } : undefined;
+  if (loaded && loadedBookable)
+    return { kind: "found", offer: loaded, bookable: loadedBookable, refreshed: false };
+  if (!hasFlightBackend()) return { kind: "gone" };
+  try {
+    const offer = await refreshSupplierOffer(id, search);
+    const bookable = offer && toBookableOffer(offer);
+    return offer && bookable ? { kind: "found", offer, bookable, refreshed: true } : { kind: "gone" };
+  } catch {
+    return { kind: "failed" };
+  }
 }
 
 export default async function BookFlight({
@@ -42,7 +52,21 @@ export default async function BookFlight({
   const { id } = await params;
   const query = buildSearchQuery(search);
   const found = await loadBookableOffer(id, search);
-  if (!found) {
+  if (found.kind === "failed") {
+    return (
+      <main id="main" className="empty-state page-width" role="alert">
+        <h1>We couldn’t load this fare right now.</h1>
+        <p>Please try again.</p>
+        <FlightLink href={`/flights/${encodeURIComponent(id)}/book?${query}`} className="button button-blue">
+          Try again
+        </FlightLink>
+        <FlightLink href={`/flights?${query}`} className="button button-blue">
+          Search flights again
+        </FlightLink>
+      </main>
+    );
+  }
+  if (found.kind === "gone") {
     return (
       <main id="main" className="empty-state page-width" role="alert">
         <h1>This flight is no longer available.</h1>
