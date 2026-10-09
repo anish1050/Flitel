@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 vi.mock("@/lib/flight-api", () => ({ streamFlightOffers: vi.fn() }));
 vi.mock("@/lib/flights", () => import("../../../../lib/flights"));
+vi.mock("@/lib/request-body", () => import("../../../../lib/request-body"));
 import { POST } from "./route";
 
 describe("flight search proxy validation", () => {
