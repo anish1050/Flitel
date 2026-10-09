@@ -39,6 +39,7 @@ import {
   loadFlightSearch,
 } from "./flight-search-cache.js";
 import { fetchFlightBatches } from "./flight-batches.js";
+import { findSameFlight } from "./offer-refresh.js";
 
 const app = new Hono();
 
@@ -74,7 +75,7 @@ app.use(
   }),
 );
 
-async function fetchCurrentOffer(id: string, token?: string): Promise<FlightOffer> {
+async function fetchOffer(id: string, token?: string): Promise<FlightOffer> {
   const response = await requestDuffel(
     `/air/offers/${encodeURIComponent(id)}`,
     undefined,
@@ -88,10 +89,15 @@ async function fetchCurrentOffer(id: string, token?: string): Promise<FlightOffe
       "The flight supplier returned an invalid response. Please try again.",
     );
   }
-  if (Date.parse(result.data.expires_at) <= Date.now()) {
+  return result.data;
+}
+
+async function fetchCurrentOffer(id: string, token?: string): Promise<FlightOffer> {
+  const offer = await fetchOffer(id, token);
+  if (Date.parse(offer.expires_at) <= Date.now()) {
     raiseApiError(410, "OFFER_UNAVAILABLE", "This offer has expired. Please search again.");
   }
-  return result.data;
+  return offer;
 }
 
 app.get("/api/health", async (context) => {
@@ -206,6 +212,47 @@ app.get("/api/flights/offers/:id", async (context) => {
   return context.json({ data: await fetchCurrentOffer(parsed.data) });
 });
 
+app.post("/api/flights/offers/:id/refresh", async (context) => {
+  const id = offerId.safeParse(context.req.param("id"));
+  if (!id.success) {
+    raiseApiError(400, "INVALID_OFFER_ID", "Choose a valid flight offer.");
+  }
+  const parsed = searchSchema.safeParse(
+    await context.req.json().catch(() => undefined),
+  );
+  if (!parsed.success) {
+    raiseApiError(
+      400,
+      "INVALID_SEARCH",
+      parsed.error.issues[0]?.message ?? "Provide valid flight search details.",
+    );
+  }
+  const token = requireDuffelTestToken();
+  // Lapsed offers are still readable; skipping the expiry check is the point.
+  const original = await fetchOffer(id.data, token);
+  // Never the search cache: it can hold the very offer Duffel just rejected.
+  const response = await requestDuffel(
+    "/air/offer_requests?return_offers=true&supplier_timeout=10000",
+    createOfferRequest(parsed.data),
+    { token },
+  );
+  const fresh = offerRequestSchema.safeParse(response);
+  if (!fresh.success)
+    raiseApiError(
+      502,
+      "DUFFEL_INVALID_RESPONSE",
+      "The flight supplier returned an invalid response. Please try again.",
+    );
+  const replacement = findSameFlight(original, fresh.data.offers);
+  if (!replacement)
+    raiseApiError(
+      404,
+      "OFFER_UNAVAILABLE",
+      "This flight is no longer available. Please search again.",
+    );
+  return context.json({ data: replacement });
+});
+
 const checkingBooking = { data: { status: "checking" } } as const;
 
 function replayBooking(context: Context, attempt: BookingAttempt) {
@@ -279,7 +326,7 @@ app.post("/api/bookings", async (context) => {
   if (result.outcome === "rejected") {
     await record("failed");
     if (result.codes.some((code) => code === "offer_no_longer_available" || code === "offer_expired"))
-      raiseApiError(410, "OFFER_UNAVAILABLE", "This fare has expired. Please search again.");
+      raiseApiError(410, "OFFER_UNAVAILABLE", "This fare is no longer available.");
     if (result.codes.includes("price_changed"))
       raiseApiError(409, "PRICE_CHANGED", "The fare has changed. Please review the new total.");
     raiseApiError(

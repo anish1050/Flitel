@@ -33,8 +33,11 @@ Import the [Postman collection](../docs/Flitel%20B2C%20API.postman_collection.js
 | `POST /api/flights/search`             | `{ "data": { "id": "orq_...", "live_mode": false, "offers": [...], "passengers": [...] } }` |
 | `POST /api/flights/search?stream=true` | Newline-delimited JSON offer batches followed by completion or a safe error                 |
 | `GET /api/flights/offers/:id`          | `{ "data": <Duffel offer> }`                                                                |
+| `POST /api/flights/offers/:id/refresh` | `{ "data": <Duffel offer> }` for the same flight, or `404 OFFER_UNAVAILABLE`                |
 | `POST /api/bookings`                   | `{ "data": { "orderId": "ord_..." } }`, or `202 { "data": { "status": "checking" } }` when the outcome is unknown |
 | `GET /api/bookings/:orderId`           | `{ "data": <Duffel order> }`                                                                |
+
+`POST /api/flights/offers/:id/refresh` takes the search body, runs a fresh uncached search and returns the offer for the same flight (same carrier, flight number and departure times; same fare brand when available, else the cheapest) so an unavailable fare can be replaced.
 
 Search accepts JSON:
 
