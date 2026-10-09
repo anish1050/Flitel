@@ -92,6 +92,6 @@ For Vercel, select this folder as the project root and Node.js 24. `src/index.ts
 
 ## Current scope
 
-This phase supports test flight search, temporary search caching and offer details. Supplier searches have a 10-second deadline within a 20-second HTTP timeout; batch polling is capped at 23 seconds overall. Payments, booking creation, login, webhooks and booking persistence will be added with checkout. Before a public launch, configure deployment access/rate controls and complete the live-booking flow; CORS is not authentication.
+This phase supports test flight search, temporary search caching, offer details, and test bookings. `POST /api/bookings` is paid from the Duffel test balance and books once per `attemptId` through `booking_attempts`; `GET /api/bookings/:orderId` reads a booking back. Supplier searches have a 10-second deadline within a 20-second HTTP timeout; batch polling is capped at 23 seconds overall. Card and live payments, login and webhooks are not yet built. Before a public launch, configure deployment access/rate controls and complete the live-booking flow; CORS is not authentication.
 
 Supplier contracts: [offer requests](https://duffel.com/docs/api/offer-requests), [batch offer requests](https://duffel.com/docs/api/batch-offer-requests), [offers](https://duffel.com/docs/api/offers).
