@@ -33,6 +33,8 @@ Import the [Postman collection](../docs/Flitel%20B2C%20API.postman_collection.js
 | `POST /api/flights/search`             | `{ "data": { "id": "orq_...", "live_mode": false, "offers": [...], "passengers": [...] } }` |
 | `POST /api/flights/search?stream=true` | Newline-delimited JSON offer batches followed by completion or a safe error                 |
 | `GET /api/flights/offers/:id`          | `{ "data": <Duffel offer> }`                                                                |
+| `POST /api/bookings`                   | `{ "data": { "orderId": "ord_..." } }`, or `202 { "data": { "status": "checking" } }` when the outcome is unknown |
+| `GET /api/bookings/:orderId`           | `{ "data": <Duffel order> }`                                                                |
 
 Search accepts JSON:
 
@@ -53,6 +55,8 @@ Use future dates. Airport codes must be three uppercase letters; departure must 
 Offer objects are returned with their original supplier fields after basic validation. `total_amount` is a decimal string in `total_currency` for the entire offer and all passengers; do not multiply it by passenger count or by two for returns. Preserve offer and passenger IDs. Search includes both slices of a round trip. Show each segment's operating carrier and use the supplied baggage and fare conditions.
 
 Refresh the selected offer using its ID. An expired or unavailable offer returns `410 OFFER_UNAVAILABLE`; the customer should search again. Results can also be empty. No mock results are returned by this API.
+
+Booking accepts `{ attemptId, offerId, expectedTotal, expectedCurrency, travellers, contact }`. `attemptId` is a UUID that the client creates per confirm attempt. Repeating it never books twice; the recorded result is returned instead. The order is paid from the Duffel test balance using the amount of the offer the server has just fetched. `expectedTotal` only detects price changes (`409 PRICE_CHANGED`). A timeout, 5xx or unreadable Duffel reply returns `202 checking`, because seats may have been booked. Attempts are stored in `booking_attempts` without traveller details.
 
 Errors use `{ "error": { "code": "...", "message": "..." } }`. Invalid local input returns 400, oversized requests 413, supplier-rejected searches 422, supplier/configuration outages 502/503 and timeouts 504. Upstream response bodies and credentials are not exposed. Flight responses use `Cache-Control: no-store`.
 

@@ -18,6 +18,7 @@ import {
   buildDuffelOrder,
   duffelOrderSchema,
   findTravellerMismatch,
+  orderId,
 } from "./orders.js";
 import {
   claimBookingAttempt,
@@ -288,6 +289,22 @@ app.post("/api/bookings", async (context) => {
   }
   await record("unknown");
   return context.json(checkingBooking, 202);
+});
+
+app.get("/api/bookings/:orderId", async (context) => {
+  const id = orderId.safeParse(context.req.param("orderId"));
+  if (!id.success) raiseApiError(400, "INVALID_ORDER_ID", "Choose a valid booking.");
+  const order = duffelOrderSchema.safeParse(
+    await requestDuffel(`/air/orders/${encodeURIComponent(id.data)}`),
+  );
+  if (!order.success || order.data.id !== id.data) {
+    raiseApiError(
+      502,
+      "DUFFEL_INVALID_RESPONSE",
+      "The flight supplier returned an invalid response. Please try again.",
+    );
+  }
+  return context.json({ data: order.data });
 });
 
 app.notFound(() =>

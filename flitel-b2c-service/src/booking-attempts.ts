@@ -18,7 +18,7 @@ function bookingAttempts() {
   return getDatabase().collection<BookingAttempt>("booking_attempts");
 }
 
-export function findBookingAttempt(id: string): Promise<BookingAttempt | null> {
+export async function findBookingAttempt(id: string): Promise<BookingAttempt | null> {
   return bookingAttempts().findOne({ _id: id });
 }
 

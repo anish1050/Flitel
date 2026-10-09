@@ -3,37 +3,41 @@ import app from "./index.js";
 
 const { attempts, mongo } = vi.hoisted(() => ({
   attempts: new Map<string, Record<string, unknown>>(),
-  mongo: { down: false },
+  mongo: { down: false, throwsOnConnect: false },
 }));
 vi.mock("./mongodb.js", async () => {
   const { MongoServerError } = await import("mongodb");
   const ensureUp = () => {
     if (mongo.down) throw new Error("mongodb://user:secret@host unavailable");
   };
-  return {
-    getDatabase: () => ({
-      collection: () => ({
-        findOne: async ({ _id }: { _id: string }) => {
-          ensureUp();
-          return attempts.get(_id) ?? null;
-        },
-        insertOne: async (document: { _id: string }) => {
-          ensureUp();
-          if (attempts.has(document._id))
-            throw new MongoServerError({ message: "duplicate key", code: 11000 });
-          attempts.set(document._id, { ...document });
-          return { acknowledged: true };
-        },
-        updateOne: async (
-          { _id }: { _id: string },
-          update: { $set: Record<string, unknown> },
-        ) => {
-          ensureUp();
-          Object.assign(attempts.get(_id)!, update.$set);
-          return { acknowledged: true };
-        },
-      }),
+  const database = {
+    collection: () => ({
+      findOne: async ({ _id }: { _id: string }) => {
+        ensureUp();
+        return attempts.get(_id) ?? null;
+      },
+      insertOne: async (document: { _id: string }) => {
+        ensureUp();
+        if (attempts.has(document._id))
+          throw new MongoServerError({ message: "duplicate key", code: 11000 });
+        attempts.set(document._id, { ...document });
+        return { acknowledged: true };
+      },
+      updateOne: async (
+        { _id }: { _id: string },
+        update: { $set: Record<string, unknown> },
+      ) => {
+        ensureUp();
+        Object.assign(attempts.get(_id)!, update.$set);
+        return { acknowledged: true };
+      },
     }),
+  };
+  return {
+    getDatabase: () => {
+      if (mongo.throwsOnConnect) throw new Error("MONGODB_URI is not set");
+      return database;
+    },
   };
 });
 
@@ -103,6 +107,7 @@ function placeBooking(body: unknown) {
 beforeEach(() => {
   attempts.clear();
   mongo.down = false;
+  mongo.throwsOnConnect = false;
   vi.useFakeTimers({ toFake: ["Date"] });
   vi.setSystemTime(new Date("2026-09-30T12:00:00Z"));
   vi.stubEnv("DUFFEL_ACCESS_TOKEN", "duffel_test_example");
@@ -261,5 +266,28 @@ describe("booking API", () => {
     expect(JSON.parse(text).error.code).toBe("BOOKINGS_UNAVAILABLE");
     expect(text).not.toContain("secret");
     expect(orderCalls()).toHaveLength(0);
+  });
+
+  it("returns 503 when the database driver throws before a query starts", async () => {
+    duffelReplies();
+    mongo.throwsOnConnect = true;
+    const response = await placeBooking(booking());
+    expect(response.status).toBe(503);
+    expect((await response.json()).error.code).toBe("BOOKINGS_UNAVAILABLE");
+    expect(orderCalls()).toHaveLength(0);
+  });
+
+  it("reads a booking back from Duffel by order id", async () => {
+    duffelReplies();
+    const response = await app.request("/api/bookings/ord_example123");
+    expect(response.status).toBe(200);
+    expect((await response.json()).data.booking_reference).toBe("K7XQ2M");
+
+    fetchMock.mockClear();
+    expect((await app.request("/api/bookings/not-an-order")).status).toBe(400);
+    expect(fetchMock).not.toHaveBeenCalled();
+
+    duffelReplies({ getOrder: () => Response.json({ data: { ...order, live_mode: true } }) });
+    expect((await app.request("/api/bookings/ord_example123")).status).toBe(502);
   });
 });
