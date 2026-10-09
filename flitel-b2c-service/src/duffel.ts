@@ -30,6 +30,15 @@ export function requireDuffelTestToken(): string {
   return token;
 }
 
+function duffelHeaders(token: string) {
+  return {
+    Accept: "application/json",
+    "Content-Type": "application/json",
+    "Duffel-Version": "v2",
+    Authorization: `Bearer ${token}`,
+  };
+}
+
 export async function requestDuffel(
   path: string,
   body?: unknown,
@@ -40,12 +49,7 @@ export async function requestDuffel(
   try {
     response = await fetch(`https://api.duffel.com${path}`, {
       method: body ? "POST" : "GET",
-      headers: {
-        Accept: "application/json",
-        "Content-Type": "application/json",
-        "Duffel-Version": "v2",
-        Authorization: `Bearer ${token}`,
-      },
+      headers: duffelHeaders(token),
       body: body ? JSON.stringify({ data: body }) : undefined,
       signal: options.signal
         ? AbortSignal.any([options.signal, AbortSignal.timeout(20_000)])
@@ -132,4 +136,54 @@ export async function requestDuffel(
       "The flight supplier returned an invalid response. Please try again.",
     );
   }
+}
+
+export type DuffelOrderResult =
+  | { outcome: "created"; order: unknown }
+  | { outcome: "rejected"; codes: string[]; message?: string }
+  | { outcome: "unknown" };
+
+const duffelErrorsSchema = z.object({
+  errors: z.array(
+    z.object({ code: z.string().optional(), message: z.string().optional() }),
+  ),
+});
+
+// Only a 4xx proves Duffel did not create the order; anything else might have booked seats.
+export async function placeDuffelOrder(
+  body: unknown,
+  token: string,
+): Promise<DuffelOrderResult> {
+  let response: Response;
+  try {
+    response = await fetch("https://api.duffel.com/air/orders", {
+      method: "POST",
+      headers: duffelHeaders(token),
+      body: JSON.stringify({ data: body }),
+      signal: AbortSignal.timeout(60_000),
+    });
+  } catch {
+    return { outcome: "unknown" };
+  }
+  if (response.status >= 500) {
+    await response.body?.cancel();
+    return { outcome: "unknown" };
+  }
+  const json: unknown = await response.json().catch(() => undefined);
+  if (response.ok) {
+    const envelope = z.object({ data: z.unknown() }).safeParse(json);
+    return envelope.success
+      ? { outcome: "created", order: envelope.data.data }
+      : { outcome: "unknown" };
+  }
+  const errors = duffelErrorsSchema.safeParse(json);
+  return {
+    outcome: "rejected",
+    codes: errors.success
+      ? errors.data.errors.flatMap((error) => (error.code ? [error.code] : []))
+      : [],
+    message: errors.success
+      ? errors.data.errors.find((error) => error.message)?.message
+      : undefined,
+  };
 }

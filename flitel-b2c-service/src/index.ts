@@ -1,4 +1,5 @@
 import { Hono } from "hono";
+import type { Context } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import { cors } from "hono/cors";
 import { HTTPException } from "hono/http-exception";
@@ -11,7 +12,21 @@ import {
   offerSchema,
   offerRequestSchema,
 } from "./flights.js";
+import type { FlightOffer } from "./flights.js";
 import {
+  bookingRequestSchema,
+  buildDuffelOrder,
+  duffelOrderSchema,
+  findTravellerMismatch,
+} from "./orders.js";
+import {
+  claimBookingAttempt,
+  findBookingAttempt,
+  recordBookingOutcome,
+} from "./booking-attempts.js";
+import type { BookingAttempt } from "./booking-attempts.js";
+import {
+  placeDuffelOrder,
   raiseApiError,
   readDuffelTestToken,
   requireDuffelTestToken,
@@ -49,6 +64,34 @@ app.use(
       raiseApiError(413, "REQUEST_TOO_LARGE", "The request body is too large."),
   }),
 );
+app.use(
+  "/api/bookings",
+  bodyLimit({
+    maxSize: 32 * 1024,
+    onError: () =>
+      raiseApiError(413, "REQUEST_TOO_LARGE", "The request body is too large."),
+  }),
+);
+
+async function fetchCurrentOffer(id: string, token?: string): Promise<FlightOffer> {
+  const response = await requestDuffel(
+    `/air/offers/${encodeURIComponent(id)}`,
+    undefined,
+    { token },
+  );
+  const result = offerSchema.safeParse(response);
+  if (!result.success || result.data.id !== id) {
+    raiseApiError(
+      502,
+      "DUFFEL_INVALID_RESPONSE",
+      "The flight supplier returned an invalid response. Please try again.",
+    );
+  }
+  if (Date.parse(result.data.expires_at) <= Date.now()) {
+    raiseApiError(410, "OFFER_UNAVAILABLE", "This offer has expired. Please search again.");
+  }
+  return result.data;
+}
 
 app.get("/api/health", async (context) => {
   let mongodbConnected = false;
@@ -159,25 +202,92 @@ app.get("/api/flights/offers/:id", async (context) => {
   if (!parsed.success) {
     raiseApiError(400, "INVALID_OFFER_ID", "Choose a valid flight offer.");
   }
-  const response = await requestDuffel(
-    `/air/offers/${encodeURIComponent(parsed.data)}`,
+  return context.json({ data: await fetchCurrentOffer(parsed.data) });
+});
+
+const checkingBooking = { data: { status: "checking" } } as const;
+
+function replayBooking(context: Context, attempt: BookingAttempt) {
+  if (attempt.status === "confirmed" && attempt.orderId)
+    return context.json({ data: { orderId: attempt.orderId } });
+  if (attempt.status === "failed")
+    raiseApiError(
+      422,
+      "BOOKING_FAILED",
+      "This booking could not be completed and nothing was booked. Please try again.",
+    );
+  return context.json(checkingBooking, 202);
+}
+
+function bookingsUnavailable(): never {
+  raiseApiError(
+    503,
+    "BOOKINGS_UNAVAILABLE",
+    "Booking is temporarily unavailable. Nothing was booked.",
   );
-  const result = offerSchema.safeParse(response);
-  if (!result.success || result.data.id !== parsed.data) {
+}
+
+app.post("/api/bookings", async (context) => {
+  const parsed = bookingRequestSchema.safeParse(
+    await context.req.json().catch(() => undefined),
+  );
+  if (!parsed.success) {
     raiseApiError(
-      502,
-      "DUFFEL_INVALID_RESPONSE",
-      "The flight supplier returned an invalid response. Please try again.",
+      400,
+      "INVALID_BOOKING",
+      parsed.error.issues[0]?.message ?? "Check the traveller details.",
     );
   }
-  if (Date.parse(result.data.expires_at) <= Date.now()) {
+  const booking = parsed.data;
+  const token = requireDuffelTestToken();
+
+  const earlier = await findBookingAttempt(booking.attemptId).catch(bookingsUnavailable);
+  if (earlier) return replayBooking(context, earlier);
+
+  const offer = await fetchCurrentOffer(booking.offerId, token);
+  if (
+    offer.total_amount !== booking.expectedTotal ||
+    offer.total_currency !== booking.expectedCurrency
+  ) {
+    raiseApiError(409, "PRICE_CHANGED", "The fare has changed. Please review the new total.");
+  }
+  const mismatch = findTravellerMismatch(booking, offer);
+  if (mismatch) raiseApiError(400, "INVALID_BOOKING", mismatch);
+
+  const claimedElsewhere = await claimBookingAttempt({
+    _id: booking.attemptId,
+    offerId: offer.id,
+    amount: offer.total_amount,
+    currency: offer.total_currency,
+  }).catch(bookingsUnavailable);
+  if (claimedElsewhere) return replayBooking(context, claimedElsewhere);
+
+  const result = await placeDuffelOrder(buildDuffelOrder(booking, offer), token);
+  // A failed write only loses the replay; the customer must still see the real outcome.
+  const record = (status: "confirmed" | "failed" | "unknown", orderId?: string) =>
+    recordBookingOutcome(booking.attemptId, status, orderId).catch(() => {});
+
+  if (result.outcome === "created") {
+    const order = duffelOrderSchema.safeParse(result.order);
+    if (order.success) {
+      await record("confirmed", order.data.id);
+      return context.json({ data: { orderId: order.data.id } });
+    }
+  }
+  if (result.outcome === "rejected") {
+    await record("failed");
+    if (result.codes.some((code) => code === "offer_no_longer_available" || code === "offer_expired"))
+      raiseApiError(410, "OFFER_UNAVAILABLE", "This fare has expired. Please search again.");
+    if (result.codes.includes("price_changed"))
+      raiseApiError(409, "PRICE_CHANGED", "The fare has changed. Please review the new total.");
     raiseApiError(
-      410,
-      "OFFER_UNAVAILABLE",
-      "This offer has expired. Please search again.",
+      422,
+      "BOOKING_REJECTED",
+      result.message ?? "The airline could not accept these details. Please check them and try again.",
     );
   }
-  return context.json({ data: result.data });
+  await record("unknown");
+  return context.json(checkingBooking, 202);
 });
 
 app.notFound(() =>
