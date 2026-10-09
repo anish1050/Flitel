@@ -285,16 +285,21 @@ export default async function FlightDetails({
               UTC. Prices may change; optional extras are excluded.
             </p>
           )}
-          <div className="booking-preview-note">
-            <Info size={18} />
-            <p>
-              {offer.slices
-                ? "Duffel test itinerary. No seats are reserved and no payment will be taken."
-                : "This is a preview. No seats are reserved and no payment will be taken."}
-            </p>
-          </div>
+          {offer.slices ? (
+            <FlightLink
+              className="button button-blue full-width"
+              href={`/flights/${encodeURIComponent(offer.id)}/book?${query}`}
+            >
+              Book this flight
+            </FlightLink>
+          ) : (
+            <div className="booking-preview-note">
+              <Info size={18} />
+              <p>This is a preview. No seats are reserved and no payment will be taken.</p>
+            </div>
+          )}
           <FlightLink
-            className="button button-blue full-width"
+            className={offer.slices ? "change-search" : "button button-blue full-width"}
             href={`/flights?${query}`}
           >
             Compare other flights
