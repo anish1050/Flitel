@@ -1,6 +1,8 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 vi.mock("server-only", () => ({}));
 import {
+  createBooking,
+  fetchBooking,
   fetchFlightOffers,
   fetchFlightOffer,
   streamFlightOffers,
@@ -111,5 +113,39 @@ describe("flight backend connection", () => {
     await expect(
       fetchFlightOffer("off_test123", createDefaultSearch()),
     ).rejects.toThrow(/expired/);
+  });
+});
+
+describe("booking backend connection", () => {
+  it("passes the backend's booking answer through unchanged", async () => {
+    vi.stubEnv("FLITEL_API_URL", "http://127.0.0.1:3001/");
+    const request = vi
+      .fn()
+      .mockResolvedValue(Response.json({ error: { code: "PRICE_CHANGED", message: "Changed" } }, { status: 409 }));
+    vi.stubGlobal("fetch", request);
+    expect(await createBooking({ attemptId: "a" })).toEqual({
+      status: 409,
+      body: { error: { code: "PRICE_CHANGED", message: "Changed" } },
+    });
+    expect(request).toHaveBeenCalledWith(
+      "http://127.0.0.1:3001/api/bookings",
+      expect.objectContaining({ method: "POST", cache: "no-store", body: '{"attemptId":"a"}' }),
+    );
+  });
+
+  it("treats an unreachable backend during booking as unknown, never failed", async () => {
+    vi.stubEnv("FLITEL_API_URL", "http://127.0.0.1:3001");
+    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new TypeError("fetch failed")));
+    expect(await createBooking({})).toEqual({ status: 202, body: { data: { status: "checking" } } });
+  });
+
+  it("refuses to book without a backend and never fetches malformed booking ids", async () => {
+    vi.stubEnv("FLITEL_API_URL", "");
+    expect((await createBooking({})).status).toBe(503);
+    vi.stubEnv("FLITEL_API_URL", "http://127.0.0.1:3001");
+    const request = vi.fn();
+    vi.stubGlobal("fetch", request);
+    await expect(fetchBooking("../secret")).rejects.toThrow();
+    expect(request).not.toHaveBeenCalled();
   });
 });

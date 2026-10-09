@@ -172,6 +172,8 @@ export type FlightOffer = {
   priceScope: "adult" | "journey";
   passengerIds?: string[];
   expiresAt?: string;
+  totalAmount?: string;
+  identityDocumentsRequired?: boolean;
   slices?: DuffelSlice[];
   refundCondition?: FareCondition;
   changeCondition?: FareCondition;

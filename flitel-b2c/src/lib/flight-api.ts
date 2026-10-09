@@ -6,6 +6,11 @@ import {
   type FlightSearch,
 } from "./flights";
 import { parseDuffelOffer } from "./duffel-offers";
+import { parseDuffelOrder, type BookedFlight } from "./duffel-orders";
+
+function backendUrl(): string {
+  return process.env.FLITEL_API_URL!.trim().replace(/\/$/, "");
+}
 
 export function hasFlightBackend(): boolean {
   return Boolean(process.env.FLITEL_API_URL?.trim());
@@ -22,7 +27,7 @@ export async function streamFlightOffers(
     );
   try {
     const response = await fetch(
-      `${process.env.FLITEL_API_URL!.trim().replace(/\/$/, "")}/api/flights/search?stream=true`,
+      `${backendUrl()}/api/flights/search?stream=true`,
       {
         method: "POST",
         headers: {
@@ -63,7 +68,7 @@ async function requestFlights(
   let response: Response;
   try {
     response = await fetch(
-      `${process.env.FLITEL_API_URL!.trim().replace(/\/$/, "")}${path}`,
+      `${backendUrl()}${path}`,
       {
         method: search ? "POST" : "GET",
         headers: {
@@ -124,14 +129,49 @@ export async function fetchFlightOffer(
     throw new Error(
       "This sample fare is no longer available. Start a new search for Duffel test offers.",
     );
+  return fetchSupplierOffer(id);
+}
+
+export async function fetchSupplierOffer(id: string): Promise<FlightOffer> {
   const response = z
     .object({ data: z.unknown() })
-    .safeParse(
-      await requestFlights(`/api/flights/offers/${encodeURIComponent(id)}`),
-    );
+    .safeParse(await requestFlights(`/api/flights/offers/${encodeURIComponent(id)}`));
   if (!response.success)
-    throw new Error(
-      "The flight search service returned an invalid response. Please try again.",
-    );
+    throw new Error("The flight search service returned an invalid response. Please try again.");
   return parseDuffelOffer(response.data.data);
+}
+
+const checkingBooking = { status: 202, body: { data: { status: "checking" } } };
+
+export async function createBooking(
+  input: unknown,
+): Promise<{ status: number; body: unknown }> {
+  if (!hasFlightBackend())
+    return {
+      status: 503,
+      body: { error: { code: "BOOKINGS_UNAVAILABLE", message: "Booking is not available yet." } },
+    };
+  try {
+    const response = await fetch(`${backendUrl()}/api/bookings`, {
+      method: "POST",
+      headers: { Accept: "application/json", "Content-Type": "application/json" },
+      body: JSON.stringify(input),
+      cache: "no-store",
+      signal: AbortSignal.timeout(85_000),
+    });
+    return { status: response.status, body: await response.json().catch(() => null) };
+  } catch {
+    // The order may already exist when the backend stops answering, so never report failure here.
+    return checkingBooking;
+  }
+}
+
+export async function fetchBooking(orderId: string): Promise<BookedFlight> {
+  if (!/^ord_[A-Za-z0-9]+$/.test(orderId) || !hasFlightBackend())
+    throw new Error("This booking could not be found.");
+  const response = z
+    .object({ data: z.unknown() })
+    .safeParse(await requestFlights(`/api/bookings/${encodeURIComponent(orderId)}`));
+  if (!response.success) throw new Error("This booking could not be loaded.");
+  return parseDuffelOrder(response.data.data);
 }
