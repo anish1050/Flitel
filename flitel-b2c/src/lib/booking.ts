@@ -93,3 +93,14 @@ export function fieldErrors(error: z.ZodError): Record<string, string> {
   for (const issue of error.issues) errors[issue.path.join(".")] ??= issue.message;
   return errors;
 }
+
+const nothingBookedCodes = new Set([
+  "INVALID_BOOKING", "PRICE_CHANGED", "OFFER_UNAVAILABLE", "BOOKING_REJECTED", "BOOKING_FAILED",
+  "BOOKINGS_UNAVAILABLE", "DUFFEL_NOT_CONFIGURED", "DUFFEL_UNAVAILABLE", "DUFFEL_TIMEOUT",
+  "DUFFEL_INVALID_RESPONSE", "INVALID_SEARCH", "REQUEST_TOO_LARGE",
+]);
+
+/** True only when the backend proved no order was attempted or Duffel refused it. */
+export function isNothingBooked(errorCode: string | undefined): boolean {
+  return errorCode !== undefined && nothingBookedCodes.has(errorCode);
+}

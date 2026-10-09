@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  isNothingBooked,
   createBookingInput,
   createBookingSchema,
   fieldErrors,
@@ -61,5 +62,14 @@ describe("booking form validation", () => {
   it("counts adult age by calendar date", () => {
     expect(isAdultOn("2008-10-09", today)).toBe(true);
     expect(isAdultOn("2008-10-10", today)).toBe(false);
+  });
+});
+
+describe("isNothingBooked", () => {
+  it("is true only for codes proving no order exists", () => {
+    expect(isNothingBooked("PRICE_CHANGED")).toBe(true);
+    expect(isNothingBooked(undefined)).toBe(false);
+    expect(isNothingBooked("INTERNAL_ERROR")).toBe(false);
+    expect(isNothingBooked("NOT_FOUND")).toBe(false);
   });
 });

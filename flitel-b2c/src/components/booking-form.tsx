@@ -3,7 +3,7 @@
 import { ArrowRight, Info } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { z } from "zod";
 import {
   CheckingPanel,
@@ -15,6 +15,7 @@ import {
   createBookingInput,
   createBookingSchema,
   fieldErrors,
+  isNothingBooked,
   type BookingDetails,
   type BookingInput,
 } from "@/lib/booking";
@@ -36,7 +37,7 @@ const latestPriceSchema = z.object({
 });
 const bookingAnswerSchema = z.object({
   data: z.object({ orderId: z.string() }).optional(),
-  error: z.object({ message: z.string() }).optional(),
+  error: z.object({ code: z.string().optional(), message: z.string() }).optional(),
 });
 
 export function BookingForm({
@@ -65,6 +66,8 @@ export function BookingForm({
   const [busy, setBusy] = useState(false);
   const [acceptedRules, setAcceptedRules] = useState(false);
   const [attemptId, setAttemptId] = useState("");
+  const submitting = useRef(false);
+  const rulesCheckbox = useRef<HTMLInputElement>(null);
   const travellerCount = offer.passengerIds.length;
 
   function updateTraveller(index: number, changes: Partial<BookingInput["travellers"][number]>) {
@@ -104,6 +107,9 @@ export function BookingForm({
     const parsed = schema.safeParse(input);
     if (!parsed.success) {
       setErrors(fieldErrors(parsed.error));
+      requestAnimationFrame(() =>
+        document.querySelector<HTMLElement>('#booking-form [aria-invalid="true"]')?.focus(),
+      );
       return;
     }
     setErrors({});
@@ -116,10 +122,12 @@ export function BookingForm({
     setAttemptId(crypto.randomUUID());
     setAcceptedRules(false);
     setStep("review");
+    requestAnimationFrame(() => rulesCheckbox.current?.focus());
   }
 
   async function confirm() {
-    if (!details || busy) return;
+    if (!details || submitting.current) return;
+    submitting.current = true;
     setBusy(true);
     setProblem(undefined);
     const response = await fetch("/api/bookings", {
@@ -140,14 +148,16 @@ export function BookingForm({
       router.replace(`/bookings/${encodeURIComponent(orderId)}`);
       return;
     }
-    // No answer, 202, or an unreadable 200: seats may be booked, so never offer a retry.
-    if (!response || response.status === 202 || response.ok) {
+    // Only a code proving no order exists allows a retry; anything else may hide a created order.
+    const errorCode = answer.data?.error?.code;
+    if (!response || !isNothingBooked(errorCode)) {
       setStep("checking");
       return;
     }
+    submitting.current = false;
     setBusy(false);
     setAttemptId(crypto.randomUUID());
-    if (response.status === 409) {
+    if (errorCode === "PRICE_CHANGED") {
       setAcceptedRules(false);
       await recheckPrice();
       return;
@@ -156,7 +166,7 @@ export function BookingForm({
       message:
         answer.data?.error?.message ??
         "This booking could not be completed and nothing was booked. Please try again.",
-      searchAgain: response.status === 410,
+      searchAgain: errorCode === "OFFER_UNAVAILABLE",
     });
   }
 
@@ -240,6 +250,7 @@ export function BookingForm({
           <>
             <label className="fare-rules-check">
               <input
+                ref={rulesCheckbox}
                 type="checkbox"
                 checked={acceptedRules}
                 disabled={busy}
