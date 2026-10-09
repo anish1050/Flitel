@@ -2,7 +2,7 @@
 
 Ready to send manually. Nothing here has been sent. Replace every `[bracket]` before sending.
 
-**The one requirement every supplier must confirm in writing:** Flitel pays nothing before a booking. No card, deposit, wallet top-up, credit line or fee from us beforehand. The customer's card is charged at the moment the ticket is booked, and our margin is settled afterwards.
+**Everything happens by email (no calls). The one requirement every supplier must confirm in writing:** Flitel pays nothing before a booking. No card, deposit, wallet top-up, credit line or fee from us beforehand. The customer's card is charged at the moment the ticket is booked, and our margin is settled afterwards.
 
 ## Where to send each one
 
@@ -43,7 +43,7 @@ Your airline pages mention paying airlines with "your users' cards". Could you c
 6. Who handles refunds, cancellations and chargebacks, and our liability for each.
 7. The time and steps from sandbox to production.
 
-Happy to join a short call. Thank you.
+Please reply in writing. Thank you.
 
 Regards,
 [your name]
@@ -73,7 +73,7 @@ Could you please confirm in writing:
 7. Refund, cancellation and chargeback handling, and our liability.
 8. The time and steps from sandbox to production.
 
-Thank you. Happy to share more details or join a call.
+Please reply in writing; happy to share more details by email. Thank you.
 
 Regards,
 [your name]
