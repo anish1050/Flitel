@@ -1,0 +1,133 @@
+{
+  "info": {
+    "name": "Flitel B2C API",
+    "description": "Local Duffel test-mode integration with MongoDB readiness. Configure DUFFEL_ACCESS_TOKEN and MongoDB in the backend .env.local, never in this collection. No requests create bookings or payments.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "base_url",
+      "value": "http://127.0.0.1:3001"
+    },
+    {
+      "key": "offer_id",
+      "value": ""
+    }
+  ],
+  "item": [
+    {
+      "name": "Health",
+      "request": {
+        "method": "GET",
+        "url": "{{base_url}}/api/health"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('Backend and MongoDB are ready', () => pm.response.to.have.status(200));",
+              "pm.test('MongoDB is connected', () => pm.expect(pm.response.json().mongodbConnected).to.eql(true));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Search round-trip flights",
+      "event": [
+        {
+          "listen": "prerequest",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "const departure = new Date(); departure.setUTCDate(departure.getUTCDate() + 14);",
+              "const inbound = new Date(departure); inbound.setUTCDate(inbound.getUTCDate() + 7);",
+              "pm.variables.set('depart', departure.toISOString().slice(0, 10));",
+              "pm.variables.set('return_date', inbound.toISOString().slice(0, 10));"
+            ]
+          }
+        },
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('Search succeeds with a configured token', () => pm.response.to.have.status(200));",
+              "if (pm.response.code === 200) {",
+              "  const offers = pm.response.json().data.offers;",
+              "  pm.collectionVariables.set('offer_id', offers.length ? offers[0].id : '');",
+              "}"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": "{{base_url}}/api/flights/search",
+        "body": {
+          "mode": "raw",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          },
+          "raw": "{\n  \"from\": \"BOM\",\n  \"to\": \"DXB\",\n  \"depart\": \"{{depart}}\",\n  \"returnDate\": \"{{return_date}}\",\n  \"travellers\": 1,\n  \"cabin\": \"economy\",\n  \"trip\": \"round-trip\"\n}"
+        },
+        "description": "Uses one adult. Run Health first. A missing token returns 503; a configured test token returns supplier offers or an empty list. Saves the first offer ID for the detail request."
+      }
+    },
+    {
+      "name": "Refresh selected offer",
+      "request": {
+        "method": "GET",
+        "url": "{{base_url}}/api/flights/offers/{{offer_id}}",
+        "description": "Run a successful search first. Refreshes the selected offer's current details. Expired offers require a new search."
+      }
+    },
+    {
+      "name": "Search flights progressively",
+      "event": [
+        {
+          "listen": "prerequest",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "const departure = new Date(); departure.setUTCDate(departure.getUTCDate() + 14);",
+              "const inbound = new Date(departure); inbound.setUTCDate(inbound.getUTCDate() + 7);",
+              "pm.variables.set('depart', departure.toISOString().slice(0, 10));",
+              "pm.variables.set('return_date', inbound.toISOString().slice(0, 10));"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": "{{base_url}}/api/flights/search?stream=true",
+        "body": {
+          "mode": "raw",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          },
+          "raw": "{\n  \"from\": \"BOM\",\n  \"to\": \"DXB\",\n  \"depart\": \"{{depart}}\",\n  \"returnDate\": \"{{return_date}}\",\n  \"travellers\": 1,\n  \"cabin\": \"economy\",\n  \"trip\": \"round-trip\"\n}"
+        },
+        "description": "Streams newline-delimited JSON: offers batches, then complete; errors use an error event. Repeating an identical search can use the short-lived MongoDB cache. X-Flight-Cache reports HIT, MISS or BYPASS. Postman may display the completed stream together; use the web app to see offers arrive progressively."
+      }
+    }
+  ]
+}

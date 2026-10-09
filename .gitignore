@@ -1,0 +1,8 @@
+node_modules/
+.next/
+.references/
+.env*
+!.env.example
+*.tsbuildinfo
+test-results/
+playwright-report/
