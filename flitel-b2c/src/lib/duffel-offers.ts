@@ -9,11 +9,11 @@ const airlineSchema = z.object({
   name: z.string().min(1),
   iata_code: z.string().nullable(),
 });
-const amountSchema = z
+export const amountSchema = z
   .string()
   .regex(/^\d+(?:\.\d+)?$/)
   .refine((amount) => Number.isFinite(Number(amount)));
-const currencySchema = z.string().regex(/^[A-Z]{3}$/);
+export const currencySchema = z.string().regex(/^[A-Z]{3}$/);
 const conditionSchema = z
   .object({
     allowed: z.boolean(),
@@ -50,7 +50,7 @@ const segmentSchema = z.object({
     .default([]),
 });
 
-const sliceSchema = z.object({
+export const sliceSchema = z.object({
   id: z.string(),
   duration: z.string().nullish(),
   segments: z.array(segmentSchema).min(1),
@@ -64,6 +64,7 @@ const offerSchema = z.object({
   live_mode: z.literal(false),
   total_amount: amountSchema,
   total_currency: currencySchema,
+  passenger_identity_documents_required: z.boolean().default(false),
   expires_at: z.iso.datetime({ offset: true }),
   owner: airlineSchema,
   passengers: z.array(z.object({ id: z.string() })).min(1),
@@ -133,6 +134,8 @@ export function parseDuffelOffer(input: unknown): FlightOffer {
     stops: offer.slices.reduce((total, slice) => total + sliceStops(slice), 0),
     price: Number(offer.total_amount),
     currency: offer.total_currency,
+    totalAmount: offer.total_amount,
+    identityDocumentsRequired: offer.passenger_identity_documents_required,
     priceScope: "journey",
     passengerIds: offer.passengers.map((passenger) => passenger.id),
     baggage: "See baggage by traveller in itinerary",

@@ -8,6 +8,12 @@ describe("Duffel offer mapping", () => {
   it("keeps the supplier journey total, currency, all slices and local flight times", () => {
     const offer = parseDuffelOffer(supplierOffer);
     expect(offer.price).toBe(450.25);
+    expect(offer.totalAmount).toBe("450.25");
+    expect(offer.identityDocumentsRequired).toBe(false);
+    expect(
+      parseDuffelOffer({ ...supplierOffer, passenger_identity_documents_required: true })
+        .identityDocumentsRequired,
+    ).toBe(true);
     expect(offer.currency).toBe("USD");
     expect(offer.priceScope).toBe("journey");
     expect(offer.passengerIds).toEqual(["pas_1", "pas_2"]);
