@@ -213,7 +213,7 @@ export function summariseHotels(raw: unknown): HotelSummary[] {
           photo: info?.main_photo || info?.thumbnail,
           address: info?.address,
           stars: info?.stars,
-          rating: info?.rating,
+          rating: knownRating(info?.rating),
           price: toPrice(cheapest.offerRetailRate),
           refundable: allRatesRefundable(cheapest),
         },
@@ -271,13 +271,29 @@ function plainText(html: string): string {
     .trim();
 }
 
-export function normaliseRooms(
-  raw: unknown,
+// LiteAPI sends 0 for "not rated", which must not read as a rating of zero.
+const knownRating = (rating?: number) => rating || undefined;
+
+export const maxRooms = 12;
+
+// LiteAPI lists the same room once per supplier; only the cheapest of each kind is worth showing.
+function cheapestPerKind(rooms: Room[]): Room[] {
+  const seen = new Set<string>();
+  return rooms
+    .filter((room) => {
+      const kind = JSON.stringify([room.name, room.boardName, room.refundable]);
+      if (seen.has(kind)) return false;
+      seen.add(kind);
+      return true;
+    })
+    .slice(0, maxRooms);
+}
+
+function buildHotelDetail(
   hotelId: string,
-  details?: unknown,
-): { hotel: HotelDetail; rooms: Room[] } {
-  const { data, hotels } = parseRates(raw);
-  const info = hotels?.find((hotel) => hotel.id === hotelId);
+  info: HotelInfo | undefined,
+  details: unknown,
+): HotelDetail {
   const extra = hotelDetailsSchema.safeParse(details).data?.data;
   const description = plainText(
     extra?.normalizedDescription ?? extra?.hotelDescription ?? "",
@@ -285,6 +301,39 @@ export function normaliseRooms(
   const images = (extra?.hotelImages ?? []).flatMap((image) =>
     image.url ? [image.url] : [],
   );
+  return {
+    id: hotelId,
+    name: extra?.name || info?.name || "Hotel",
+    photo: extra?.main_photo || info?.main_photo || info?.thumbnail,
+    address: extra?.address || info?.address,
+    stars: extra?.starRating ?? info?.stars,
+    rating: knownRating(extra?.rating) ?? knownRating(info?.rating),
+    description: description || undefined,
+    images: images.length ? images.slice(0, 8) : undefined,
+    facilities: extra?.hotelFacilities?.length
+      ? extra.hotelFacilities.slice(0, 12)
+      : undefined,
+  };
+}
+
+export function normaliseHotelDetails(raw: unknown, hotelId: string): HotelDetail {
+  if (!hotelDetailsSchema.safeParse(raw).success) {
+    raiseApiError(
+      502,
+      "LITEAPI_INVALID_RESPONSE",
+      "The hotel supplier returned an invalid response. Please try again.",
+    );
+  }
+  return buildHotelDetail(hotelId, undefined, raw);
+}
+
+export function normaliseRooms(
+  raw: unknown,
+  hotelId: string,
+  details?: unknown,
+): { hotel: HotelDetail; rooms: Room[] } {
+  const { data, hotels } = parseRates(raw);
+  const info = hotels?.find((hotel) => hotel.id === hotelId);
 
   const rooms = (data.find((entry) => entry.hotelId === hotelId)?.roomTypes ?? [])
     .filter(isPriced)
@@ -292,20 +341,8 @@ export function normaliseRooms(
     .sort((a, b) => a.price.amount - b.price.amount);
 
   return {
-    hotel: {
-      id: hotelId,
-      name: extra?.name || info?.name || "Hotel",
-      photo: extra?.main_photo || info?.main_photo || info?.thumbnail,
-      address: extra?.address || info?.address,
-      stars: extra?.starRating ?? info?.stars,
-      rating: extra?.rating ?? info?.rating,
-      description: description || undefined,
-      images: images.length ? images.slice(0, 8) : undefined,
-      facilities: extra?.hotelFacilities?.length
-        ? extra.hotelFacilities.slice(0, 12)
-        : undefined,
-    },
-    rooms,
+    hotel: buildHotelDetail(hotelId, info, details),
+    rooms: cheapestPerKind(rooms),
   };
 }
 

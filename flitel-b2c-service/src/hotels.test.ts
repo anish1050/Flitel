@@ -5,6 +5,7 @@ import {
   classifyBookResponse,
   hotelBookingRequestSchema,
   normaliseBooking,
+  normaliseHotelDetails,
   normalisePrebook,
   normaliseRooms,
   prebookRequestSchema,
@@ -193,8 +194,19 @@ describe("normaliseRooms", () => {
     expect(normaliseRooms(body, "lp1").rooms[0].cancelBefore).toBe("2026-11-05T10:00:00Z");
   });
 
-  it("makes one room per room type, cheapest first", () => {
-    const { rooms, hotel } = normaliseRooms(ratesBody(), "lp1");
+  it("makes one room per kind of room, cheapest first", () => {
+    const body = ratesBody({
+      data: [
+        {
+          hotelId: "lp1",
+          roomTypes: [
+            roomType("o1", 9000, [rate({ name: "Suite" })]),
+            roomType("o2", 7500),
+          ],
+        },
+      ],
+    });
+    const { rooms, hotel } = normaliseRooms(body, "lp1");
 
     expect(rooms.map((room) => room.offerId)).toEqual(["o2", "o1"]);
     expect(rooms[0]).toEqual({
@@ -310,6 +322,64 @@ describe("normaliseRooms", () => {
     expect(hotel.description).toBeUndefined();
   });
 
+  const nonRefundable = rate({
+    cancellationPolicies: { cancelPolicyInfos: [], refundableTag: "NRFN" },
+  });
+  const withRooms = (roomTypes: ReturnType<typeof roomType>[]) =>
+    ratesBody({ data: [{ hotelId: "lp1", roomTypes }] });
+
+  it("keeps only the cheapest offer of the same name, board and refundability", () => {
+    const body = withRooms([
+      roomType("dear", 9000),
+      roomType("cheap", 6000),
+      roomType("mid", 7000),
+    ]);
+
+    expect(normaliseRooms(body, "lp1").rooms.map((room) => room.offerId)).toEqual(["cheap"]);
+  });
+
+  it("keeps rooms that differ in board or refundability", () => {
+    const body = withRooms([
+      roomType("base", 5000),
+      roomType("breakfast", 6000, [rate({ boardName: "Breakfast" })]),
+      roomType("strict", 4000, [nonRefundable]),
+      roomType("suite", 8000, [rate({ name: "Suite" })]),
+      roomType("base-dear", 5500),
+    ]);
+
+    expect(normaliseRooms(body, "lp1").rooms.map((room) => room.offerId)).toEqual([
+      "strict",
+      "base",
+      "breakfast",
+      "suite",
+    ]);
+  });
+
+  it("returns at most 12 rooms, the cheapest ones", () => {
+    const body = withRooms(
+      Array.from({ length: 20 }, (_, index) =>
+        roomType(`o${index}`, 1000 + index, [rate({ name: `Room ${index}` })]),
+      ),
+    );
+
+    const { rooms } = normaliseRooms(body, "lp1");
+    expect(rooms).toHaveLength(12);
+    expect(rooms[0].offerId).toBe("o0");
+    expect(rooms[11].offerId).toBe("o11");
+  });
+
+  it("treats a rating of 0 as unknown", () => {
+    const body = ratesBody({
+      hotels: [{ id: "lp1", name: "Taj Example", rating: 0 }],
+    });
+
+    expect(normaliseRooms(body, "lp1").hotel.rating).toBeUndefined();
+    expect(summariseHotels(body)[0].rating).toBeUndefined();
+    expect(
+      normaliseRooms(body, "lp1", { data: { rating: 0 } }).hotel.rating,
+    ).toBeUndefined();
+  });
+
   it("fails closed on a currency that is not a three-letter code", () => {
     const body = ratesBody();
     const bad = JSON.stringify(body).replaceAll('"INR"', '"RUPEE"');
@@ -318,6 +388,38 @@ describe("normaliseRooms", () => {
 
   it("fails closed when the rates body has the wrong shape", () => {
     expect(() => normaliseRooms({ nope: true }, "lp1")).toThrow();
+  });
+});
+
+describe("normaliseHotelDetails", () => {
+  it("builds the hotel from the details response alone", () => {
+    const hotel = normaliseHotelDetails(
+      {
+        data: {
+          name: "Taj Example",
+          main_photo: "https://img.example/m.jpg",
+          address: "Apollo Bunder",
+          starRating: 5,
+          rating: 0,
+          hotelDescription: "<p>Seaside</p>",
+        },
+      },
+      "lp1",
+    );
+
+    expect(hotel).toMatchObject({
+      id: "lp1",
+      name: "Taj Example",
+      photo: "https://img.example/m.jpg",
+      address: "Apollo Bunder",
+      stars: 5,
+      description: "Seaside",
+    });
+    expect(hotel.rating).toBeUndefined();
+  });
+
+  it("fails closed when the body has the wrong shape", () => {
+    expect(() => normaliseHotelDetails({ data: "garbage" }, "lp1")).toThrow();
   });
 });
 

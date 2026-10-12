@@ -15,6 +15,7 @@ import {
   classifyBookResponse,
   hotelBookingRequestSchema,
   normaliseBooking,
+  normaliseHotelDetails,
   normalisePrebook,
   normaliseRooms,
   prebookRequestSchema,
@@ -108,11 +109,47 @@ hotelRoutes.post("/hotels/search", async (context) => {
   return context.json({ data: { hotels: summariseHotels(response) } });
 });
 
-hotelRoutes.post("/hotels/:hotelId/rates", async (context) => {
-  const hotelId = context.req.param("hotelId");
+function validHotelId(context: Context): string {
+  const hotelId = context.req.param("hotelId") ?? "";
   if (!hotelIdPattern.test(hotelId)) {
     raiseApiError(400, "INVALID_HOTEL_ID", "Choose a valid hotel.");
   }
+  return hotelId;
+}
+
+hotelRoutes.get("/hotels/:hotelId", async (context) => {
+  const hotelId = validHotelId(context);
+  requireLiteapiKey();
+
+  let result;
+  try {
+    result = await requestLiteapi(
+      "api",
+      `/data/hotel?hotelId=${encodeURIComponent(hotelId)}`,
+      { timeoutMs: 6_000 },
+    );
+  } catch (error) {
+    if (error instanceof LiteapiUnreachable) {
+      raiseApiError(504, "HOTELS_TIMEOUT", "Hotel details took too long. Please try again.");
+    }
+    throw error;
+  }
+  if (result.status === 404) {
+    raiseApiError(404, "HOTEL_NOT_FOUND", "This hotel could not be found.");
+  }
+  if (!isSuccess(result.status)) {
+    raiseApiError(
+      502,
+      "HOTELS_UNAVAILABLE",
+      "Hotels are unavailable right now. Nothing was booked.",
+    );
+  }
+  assertSandbox(result.body);
+  return context.json({ data: { hotel: normaliseHotelDetails(result.body, hotelId) } });
+});
+
+hotelRoutes.post("/hotels/:hotelId/rates", async (context) => {
+  const hotelId = validHotelId(context);
   const parsed = roomsStaySchema.safeParse(await readJson(context.req.raw));
   if (!parsed.success) invalidStay(parsed.error.issues[0]?.message);
   const { checkin, checkout, adults, currency, guestNationality } = parsed.data;

@@ -394,6 +394,90 @@ describe("POST /api/hotels/:hotelId/rates", () => {
   });
 });
 
+describe("GET /api/hotels/:hotelId", () => {
+  const get = (path: string) => app.request(path);
+  const details = {
+    data: {
+      id: "lp1",
+      name: "Taj Example",
+      main_photo: "https://img.example/m.jpg",
+      address: "Apollo Bunder",
+      starRating: 5,
+      rating: 0,
+      hotelDescription: "<p>Seaside</p>",
+    },
+    sandbox: true,
+  };
+
+  it("returns only the hotel and never asks for rates", async () => {
+    fetchMock.mockResolvedValue(Response.json(details));
+
+    const response = await get("/api/hotels/lp1");
+
+    expect(response.status).toBe(200);
+    const { data } = await response.json();
+    expect(data).toEqual({
+      hotel: {
+        id: "lp1",
+        name: "Taj Example",
+        photo: "https://img.example/m.jpg",
+        address: "Apollo Bunder",
+        stars: 5,
+        description: "Seaside",
+      },
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock.mock.calls[0][0]).toBe(
+      "https://api.liteapi.travel/v3.0/data/hotel?hotelId=lp1",
+    );
+  });
+
+  it("rejects a bad hotel id without calling LiteAPI", async () => {
+    const response = await get("/api/hotels/a");
+
+    expect(response.status).toBe(400);
+    expect((await response.json()).error.code).toBe("INVALID_HOTEL_ID");
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("is 503 without a key and calls nothing", async () => {
+    vi.stubEnv("LITEAPI_KEY", "");
+
+    expect((await get("/api/hotels/lp1")).status).toBe(503);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("answers 404 HOTEL_NOT_FOUND when LiteAPI has no such hotel", async () => {
+    fetchMock.mockResolvedValue(Response.json({ error: { code: 4000 } }, { status: 404 }));
+
+    const response = await get("/api/hotels/lp1");
+
+    expect(response.status).toBe(404);
+    expect((await response.json()).error.code).toBe("HOTEL_NOT_FOUND");
+  });
+
+  it("maps an upstream 500 to 502 and a timeout to 504", async () => {
+    fetchMock.mockResolvedValue(Response.json({}, { status: 500 }));
+    expect((await get("/api/hotels/lp1")).status).toBe(502);
+
+    fetchMock.mockReset();
+    fetchMock.mockRejectedValue(new DOMException("timed out", "TimeoutError"));
+    const timedOut = await get("/api/hotels/lp1");
+    expect(timedOut.status).toBe(504);
+    expect((await timedOut.json()).error.code).toBe("HOTELS_TIMEOUT");
+  });
+
+  it("refuses a live response and an unreadable body", async () => {
+    fetchMock.mockResolvedValue(Response.json({ ...details, sandbox: false }));
+    expect((await get("/api/hotels/lp1")).status).toBe(503);
+
+    fetchMock.mockResolvedValue(Response.json({ data: "garbage" }));
+    const invalid = await get("/api/hotels/lp1");
+    expect(invalid.status).toBe(502);
+    expect((await invalid.json()).error.code).toBe("LITEAPI_INVALID_RESPONSE");
+  });
+});
+
 const prebookResponse = (changes: Record<string, unknown> = {}) => ({
   data: {
     prebookId: "pb_123",
