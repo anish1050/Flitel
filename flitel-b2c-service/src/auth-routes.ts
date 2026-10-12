@@ -100,8 +100,8 @@ authRoutes.post("/auth/otp/send", async (context) => {
   );
   await sendEmail({
     to: email,
-    subject: "Your Flitel verification code",
-    text: `Your Flitel verification code is ${code}.\nIt expires in 10 minutes. If you didn't ask for it, you can ignore this email.`,
+    subject: "Your TripKnot verification code",
+    text: `Your TripKnot verification code is ${code}.\nIt expires in 10 minutes. If you didn't ask for it, you can ignore this email.`,
   });
   return context.json({ data: { sent: true } });
 });

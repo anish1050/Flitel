@@ -102,7 +102,7 @@ export type HotelBookingOutcome =
 // The card is charged before the booking call, so every failed message says what happens to the money.
 // BOOKINGS_UNAVAILABLE and LITEAPI_NOT_CONFIGURED claim nothing server-side, so a re-send can still book.
 const refundNote =
-  " If your card was charged, Flitel will arrange any refund. Please keep your booking reference.";
+  " If your card was charged, TripKnot will arrange any refund. Please keep your booking reference.";
 const failureReasons: Record<string, string> = {
   BOOKING_REJECTED: "The hotel could not accept these details, so your booking was not completed.",
   ROOM_UNAVAILABLE: "This room is no longer available, so your booking was not completed.",

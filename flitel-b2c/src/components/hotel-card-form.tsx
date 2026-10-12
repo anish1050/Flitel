@@ -22,7 +22,7 @@ const sdkUrl = "https://payment-wrapper.liteapi.travel/dist/liteAPIPayment.js?v=
 const sdkTimeoutMs = 15_000;
 // Once the form is live the customer may have been charged, so this wording never says otherwise.
 const paymentErrorMessage = (reference: string) =>
-  `Something went wrong with the card form. If your card was charged, please keep this reference and quote it to Flitel: ${reference}. Otherwise you can try again.`;
+  `Something went wrong with the card form. If your card was charged, please keep this reference and quote it to TripKnot: ${reference}. Otherwise you can try again.`;
 
 let sdkLoading: Promise<void> | undefined;
 
@@ -86,7 +86,7 @@ export function CardForm({
           }),
           targetElement: "#hotel-payment",
           appearance: { theme: "flat" },
-          options: { business: { name: "Flitel" } },
+          options: { business: { name: "TripKnot" } },
         });
       } catch {
         if (!cancelled) loadFailed.current();

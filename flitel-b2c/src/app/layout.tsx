@@ -5,11 +5,11 @@ import "./globals.css";
 
 export const metadata: Metadata = {
   title: {
-    default: "Flitel — Find your next takeoff",
-    template: "%s | Flitel",
+    default: "TripKnot — Find your next takeoff",
+    template: "%s | TripKnot",
   },
   description:
-    "Explore the first Flitel flight experience. Find a destination, compare sample flights and preview your journey.",
+    "Explore the first TripKnot flight experience. Find a destination, compare sample flights and preview your journey.",
   robots: { index: false, follow: false },
 };
 

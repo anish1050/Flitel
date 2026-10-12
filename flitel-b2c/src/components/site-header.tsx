@@ -6,10 +6,10 @@ export function SiteHeader() {
   return (
     <header className="site-header">
       <div className="header-inner">
-        <FlightLink className="brand" href="/" aria-label="Flitel home">
+        <FlightLink className="brand" href="/" aria-label="TripKnot home">
           <Compass size={29} strokeWidth={2.5} />
           <span>
-            flitel<span className="brand-dot">.</span>
+            tripknot<span className="brand-dot">.</span>
           </span>
         </FlightLink>
         <nav aria-label="Main navigation">
@@ -20,7 +20,7 @@ export function SiteHeader() {
             Hotels
           </FlightLink>
           <FlightLink className="nav-link" href="/#travel-made-simple">
-            Why Flitel
+            Why TripKnot
           </FlightLink>
         </nav>
         <div className="header-actions">
@@ -48,14 +48,14 @@ export function SiteFooter() {
       <div>
         <FlightLink className="brand" href="/">
           <Compass size={24} />
-          <span>flitel.</span>
+          <span>tripknot.</span>
         </FlightLink>
         <p>A little closer to somewhere new.</p>
       </div>
       <p className="demo-disclaimer">
         {hasFlightBackend()
           ? "Duffel test mode. Fares and schedules may be unrealistic."
-          : "An early look at Flitel. All fares and schedules are examples."}
+          : "An early look at TripKnot. All fares and schedules are examples."}
         <br />
         {hasFlightBackend()
           ? "Test bookings run in test mode for flights and hotels. No real tickets or rooms are booked."
