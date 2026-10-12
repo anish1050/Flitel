@@ -23,7 +23,8 @@ The server starts without a token or a database connection. Flight endpoints ret
 | `MONGODB_DBNAME`      | `flitel`                                                   | Database name                   |
 | `SESSION_SECRET`      | Required for booking; 32+ random characters                | Signs email sign-in tokens      |
 | `FLITEL_API_SECRET`   | Empty (open); set it in production                         | When set, only callers sending it in `X-Flitel-Internal` are served (health excepted) |
-| `RESEND_API_KEY`, `EMAIL_FROM` | Empty                                             | Sends the email codes           |
+| `SMTP_USER`, `SMTP_PASSWORD`, `SMTP_HOST` | Empty; host defaults to `smtp.gmail.com` | Sends the email codes from an ordinary mailbox (Gmail app password); no domain needed |
+| `RESEND_API_KEY`, `EMAIL_FROM` | Empty                                             | Sends the email codes through Resend; needs a verified domain |
 | `OTP_DEV_ECHO`        | Empty                                                      | `true` prints codes to the console instead of emailing them; local only |
 
 `src/mongodb.ts` reuses one connection pool and exposes the `flights` collection. Connections open when needed, with a three-second operation timeout. Health runs a read-only ping: it returns 200 with `mongodbConnected: true` when connected, or 503 with `status: "degraded"` and `mongodbConnected: false` when unavailable. Connection errors and URIs are not exposed. Successful searches may write temporary results to `flight_searches`; existing `flights` documents remain unchanged.
