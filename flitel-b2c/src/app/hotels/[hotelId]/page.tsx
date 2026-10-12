@@ -12,29 +12,105 @@ import {
   cancellationLabel,
   nightsBetween,
   parseStayParams,
+  type HotelDetail,
   type Room,
   type StayInput,
 } from "@/lib/hotels";
 
 export const metadata: Metadata = { title: "Your hotel" };
 
-const maxImages = 8;
 // Mirrors maxRooms in flitel-b2c-service/src/hotels.ts.
 const backendRoomCap = 12;
+const facilityCardCount = 3;
 
-function RoomRow({
+function HotelHero({ hotel, photo }: { hotel: HotelDetail; photo?: string }) {
+  return (
+    <header className={photo ? "hotel-hero" : "hotel-hero hotel-hero-plain"}>
+      {photo && <img src={photo} alt="" />}
+      <div className="hotel-hero-shade" />
+      <div className="hotel-hero-badges">
+        {hotel.stars !== undefined && (
+          <span>
+            <Star size={11} aria-hidden="true" /> {hotel.stars} star
+          </span>
+        )}
+        {hotel.rating ? <span>Rated {hotel.rating}</span> : null}
+      </div>
+      <div className="hotel-hero-text">
+        <span className="eyebrow">YOUR STAY</span>
+        <h1>{hotel.name}</h1>
+        {hotel.address && <p>{hotel.address}</p>}
+      </div>
+    </header>
+  );
+}
+
+// LiteAPI photos are unlabelled, so the first few facilities borrow the next gallery photos.
+function HotelFacilities({ hotel, photos }: { hotel: HotelDetail; photos: string[] }) {
+  const facilities = hotel.facilities ?? [];
+  const featured = facilities.slice(0, facilityCardCount);
+  const remaining = facilities.slice(facilityCardCount);
+  if (!hotel.description && featured.length === 0) return null;
+  return (
+    <section className="hotel-intro" aria-labelledby="hotel-facilities-heading">
+      <div className="hotel-intro-lead">
+        <div>
+          <span className="eyebrow">PREMIUM FACILITIES</span>
+          <h2 id="hotel-facilities-heading">Everything you need for the stay</h2>
+        </div>
+        {hotel.description && <p>{hotel.description}</p>}
+      </div>
+      {featured.length > 0 && (
+        <ul className="hotel-facility-cards">
+          {featured.map((facility, index) => (
+            <li key={`${index}-${facility}`}>
+              {photos[index] ? (
+                <img src={photos[index]} alt="" loading="lazy" />
+              ) : (
+                <div className="hotel-facility-photo-empty" aria-hidden="true" />
+              )}
+              <strong>{facility}</strong>
+            </li>
+          ))}
+        </ul>
+      )}
+      {remaining.length > 0 && (
+        <ul className="hotel-amenities">
+          {remaining.map((facility, index) => (
+            <li key={`${index}-${facility}`}>
+              <span className="hotel-amenity-icon" aria-hidden="true">
+                <Star size={16} />
+              </span>
+              {facility}
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
+  );
+}
+
+// LiteAPI supplies hotel photos but none per room, so rooms reuse the hotel gallery in rotation.
+function RoomCard({
   room,
+  photo,
   nights,
   reserveHref,
 }: {
   room: Room;
+  photo?: string;
   nights: number;
   reserveHref: string;
 }) {
   const nightsLabel = `${nights} ${nights === 1 ? "night" : "nights"}`;
   return (
-    <li className="room-row">
-      <div>
+    <li className="room-card">
+      {photo ? (
+        <img src={photo} alt="" loading="lazy" />
+      ) : (
+        <div className="room-card-photo-empty" aria-hidden="true" />
+      )}
+      <div className="room-card-body">
         <h3>{room.name}</h3>
         {room.boardName && <p>{room.boardName}</p>}
         <p className={room.refundable ? "room-refundable" : undefined}>
@@ -48,16 +124,18 @@ function RoomRow({
               .join(", ")}
           </small>
         )}
-      </div>
-      <div className="room-price">
-        <strong>{formatPrice(room.price.amount, room.price.currency)}</strong>
-        <span>for {nightsLabel}</span>
-        <small>
-          about {formatPrice(Math.round(room.price.amount / nights), room.price.currency)} per night
-        </small>
-        <FlightLink href={reserveHref} className="button button-blue">
-          Reserve
-        </FlightLink>
+        <div className="room-card-price">
+          <div>
+            <strong>{formatPrice(room.price.amount, room.price.currency)}</strong>
+            <small>
+              for {nightsLabel} · about{" "}
+              {formatPrice(Math.round(room.price.amount / nights), room.price.currency)} per night
+            </small>
+          </div>
+          <FlightLink href={reserveHref} className="button button-blue">
+            Reserve
+          </FlightLink>
+        </div>
       </div>
     </li>
   );
@@ -100,57 +178,25 @@ export default async function HotelDetails({
   const { hotel, rooms } = detail;
   const nights = nightsBetween(stay.checkin, stay.checkout);
   const gallery = hotel.images?.length ? hotel.images : hotel.photo ? [hotel.photo] : [];
-  const summary = [
-    hotel.stars !== undefined ? `${hotel.stars} star` : undefined,
-    hotel.rating ? `Rated ${hotel.rating}` : undefined,
-    hotel.address,
-  ]
-    .filter(Boolean)
-    .join(" · ");
+  const [heroPhoto, ...morePhotos] = gallery;
+  const roomPhotos = morePhotos.length ? morePhotos : gallery;
 
   return (
     <main id="main" className="details-page page-width">
-      <FlightLink href={backHref} className="back-link">
-        <ArrowLeft size={15} /> Back to results
-      </FlightLink>
-      <div className="details-title">
-        <div>
-          <span className="eyebrow">YOUR STAY</span>
-          <h1>{hotel.name}</h1>
-          <p>{summary}</p>
-        </div>
+      <div className="hotel-topbar">
+        <FlightLink href={backHref} className="back-link">
+          <ArrowLeft size={15} /> Back to results
+        </FlightLink>
         <span className="sample-badge">
           <Info size={14} /> Test bookings in the LiteAPI sandbox
         </span>
       </div>
-      {gallery.length > 0 && (
-        <div className="hotel-gallery">
-          {gallery.slice(0, maxImages).map((url, index) => (
-            <img key={`${index}-${url}`} src={url} alt="" loading="lazy" />
-          ))}
-        </div>
-      )}
-      {hotel.description && (
-        <section className="hotel-section">
-          <h2>About this hotel</h2>
-          <p>{hotel.description}</p>
-        </section>
-      )}
-      {hotel.facilities && hotel.facilities.length > 0 && (
-        <section className="hotel-section">
-          <h2>Facilities</h2>
-          <ul className="hotel-facilities">
-            {hotel.facilities.map((facility, index) => (
-              <li key={`${index}-${facility}`}>
-                <Star size={12} aria-hidden="true" /> {facility}
-              </li>
-            ))}
-          </ul>
-        </section>
-      )}
-      <section className="itinerary-panel">
+      <HotelHero hotel={hotel} photo={heroPhoto} />
+      <HotelFacilities hotel={hotel} photos={morePhotos} />
+
+      <section className="itinerary-panel" aria-labelledby="hotel-rooms-heading">
         <div className="panel-heading">
-          <h2>
+          <h2 id="hotel-rooms-heading">
             Rooms for {nights} {nights === 1 ? "night" : "nights"}
           </h2>
           <span>
@@ -167,13 +213,14 @@ export default async function HotelDetails({
         ) : (
           <>
             {rooms.length === backendRoomCap && (
-              <p>Showing the best {rooms.length} room options</p>
+              <p className="room-cap-note">Showing the best {rooms.length} room options</p>
             )}
-            <ul className="room-list">
-              {rooms.map((room) => (
-                <RoomRow
+            <ul className="room-cards">
+              {rooms.map((room, index) => (
+                <RoomCard
                   key={room.offerId}
                   room={room}
+                  photo={roomPhotos.length ? roomPhotos[index % roomPhotos.length] : undefined}
                   nights={nights}
                   reserveHref={`/hotels/${encodeURIComponent(hotelId)}/book?${buildReserveQuery(stay, room)}`}
                 />
