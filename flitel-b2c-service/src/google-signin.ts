@@ -5,11 +5,13 @@ const googleKeys = createRemoteJWKSet(new URL("https://www.googleapis.com/oauth2
 
 export const googleSignInConfigured = () => Boolean(process.env.GOOGLE_CLIENT_ID?.trim());
 
-/** The verified email inside a Google ID token issued for this app, or undefined for anything else. */
+export type GoogleIdentity = { email: string; firstName: string; lastName: string };
+
+/** Who a Google ID token issued for this app belongs to, or undefined for anything else. */
 export async function verifyGoogleCredential(
   credential: string,
   keys: JWTVerifyGetKey = googleKeys,
-): Promise<string | undefined> {
+): Promise<GoogleIdentity | undefined> {
   const clientId = process.env.GOOGLE_CLIENT_ID?.trim();
   if (!clientId) return undefined;
   try {
@@ -17,9 +19,13 @@ export async function verifyGoogleCredential(
       issuer: ["https://accounts.google.com", "accounts.google.com"],
       audience: clientId,
     });
-    return payload.email_verified === true && typeof payload.email === "string"
-      ? payload.email.toLowerCase()
-      : undefined;
+    if (payload.email_verified !== true || typeof payload.email !== "string") return undefined;
+    const text = (value: unknown) => (typeof value === "string" ? value.trim().slice(0, 60) : "");
+    return {
+      email: payload.email.toLowerCase(),
+      firstName: text(payload.given_name),
+      lastName: text(payload.family_name),
+    };
   } catch {
     return undefined;
   }

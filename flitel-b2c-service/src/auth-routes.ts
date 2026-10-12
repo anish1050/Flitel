@@ -31,6 +31,7 @@ type Profile = {
   firstName: string;
   lastName: string;
   phone: string;
+  createdAt: Date;
   updatedAt: Date;
 };
 
@@ -39,7 +40,16 @@ const profiles = () => getDatabase().collection<Profile>("profiles");
 
 const emailSchema = z.string().trim().toLowerCase().pipe(z.email().max(254));
 const sendSchema = z.object({ email: emailSchema });
-const verifySchema = z.object({ email: emailSchema, code: z.string().regex(/^\d{6}$/) });
+// remember is the customer's tick on "Save my details": only then is a record created at sign-in.
+const verifySchema = z.object({
+  email: emailSchema,
+  code: z.string().regex(/^\d{6}$/),
+  remember: z.boolean().optional(),
+});
+const googleSchema = z.object({
+  credential: z.string().min(20).max(4096),
+  remember: z.boolean().optional(),
+});
 const profileSchema = z.object({
   firstName: z.string().trim().min(1).max(60),
   lastName: z.string().trim().min(1).max(60),
@@ -47,6 +57,19 @@ const profileSchema = z.object({
 });
 
 const codeHash = (email: string, code: string) => hashWithSecret(`${email}:${code}`);
+
+/** Creates the customer's record on first opt-in and leaves anything they already saved alone. */
+async function rememberCustomer(
+  email: string,
+  names: { firstName: string; lastName: string } = { firstName: "", lastName: "" },
+): Promise<void> {
+  const now = new Date();
+  await profiles().updateOne(
+    { _id: hashEmail(email) },
+    { $set: { updatedAt: now }, $setOnInsert: { ...names, phone: "", createdAt: now } },
+    { upsert: true },
+  );
+}
 
 function sameHash(a: string, b: string): boolean {
   const left = Buffer.from(a);
@@ -109,7 +132,7 @@ authRoutes.post("/auth/otp/send", async (context) => {
 authRoutes.post("/auth/otp/verify", async (context) => {
   const parsed = verifySchema.safeParse(await context.req.json().catch(() => undefined));
   if (!parsed.success) raiseApiError(400, "INVALID_CODE", "Enter the 6-digit code from your email.");
-  const { email, code } = parsed.data;
+  const { email, code, remember } = parsed.data;
   const id = hashEmail(email);
 
   // The guess is counted before it is compared, so a code allows five tries however they race.
@@ -122,6 +145,7 @@ authRoutes.post("/auth/otp/verify", async (context) => {
     raiseApiError(400, "INVALID_CODE", "That code didn't work. Check it, or ask for a new one.");
   }
   await otps().deleteOne({ _id: id });
+  if (remember) await rememberCustomer(email);
   const session = issueSession(email);
   return context.json({ data: { token: session.token, expiresAt: session.expiresAt, email } });
 });
@@ -130,11 +154,13 @@ authRoutes.post("/auth/google", async (context) => {
   if (!googleSignInConfigured()) {
     raiseApiError(503, "GOOGLE_UNAVAILABLE", "Google sign-in isn't available right now.");
   }
-  const parsed = z
-    .object({ credential: z.string().min(20).max(4096) })
-    .safeParse(await context.req.json().catch(() => undefined));
-  const email = parsed.success ? await verifyGoogleCredential(parsed.data.credential) : undefined;
-  if (!email) raiseApiError(401, "GOOGLE_REJECTED", "We couldn't verify that Google sign-in. Please try again.");
+  const parsed = googleSchema.safeParse(await context.req.json().catch(() => undefined));
+  const identity = parsed.success ? await verifyGoogleCredential(parsed.data.credential) : undefined;
+  if (!parsed.success || !identity) {
+    raiseApiError(401, "GOOGLE_REJECTED", "We couldn't verify that Google sign-in. Please try again.");
+  }
+  const { email, firstName, lastName } = identity;
+  if (parsed.data.remember) await rememberCustomer(email, { firstName, lastName });
   const session = issueSession(email);
   return context.json({ data: { token: session.token, expiresAt: session.expiresAt, email } });
 });
@@ -156,9 +182,10 @@ authRoutes.put("/me/profile", async (context) => {
   const email = requireSession(context);
   const parsed = profileSchema.safeParse(await context.req.json().catch(() => undefined));
   if (!parsed.success) raiseApiError(400, "INVALID_PROFILE", "Check your name and mobile number.");
-  await profiles().replaceOne(
+  const now = new Date();
+  await profiles().updateOne(
     { _id: hashEmail(email) },
-    { ...parsed.data, updatedAt: new Date() },
+    { $set: { ...parsed.data, updatedAt: now }, $setOnInsert: { createdAt: now } },
     { upsert: true },
   );
   return context.json({ data: { saved: true } });

@@ -95,7 +95,7 @@ export function EmailVerification({
     );
   const verifyCode = () =>
     run(
-      () => post("/api/auth/verify", { email, code }),
+      () => post("/api/auth/verify", { email, code, remember: saveDetails }),
       async () => {
         onSession(await readSession());
         setCode("");
@@ -105,7 +105,7 @@ export function EmailVerification({
 
   const signInWithGoogle = (credential: string) =>
     run(
-      () => post("/api/auth/google", { credential }),
+      () => post("/api/auth/google", { credential, remember: saveDetails }),
       async () => onSession(await readSession()),
     );
 
@@ -232,6 +232,14 @@ export function EmailVerification({
             {problem}
           </p>
         )}
+        <label className="fare-rules-check">
+          <input
+            type="checkbox"
+            checked={saveDetails}
+            onChange={(event) => onSaveDetailsChange(event.target.checked)}
+          />
+          Remember me: save my name and mobile for faster booking next time. I can delete them any time.
+        </label>
         <p className="field-hint">
           We use your email to send this code and your booking updates. We never sell it.
         </p>

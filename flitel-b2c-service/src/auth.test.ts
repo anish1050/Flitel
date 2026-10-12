@@ -22,6 +22,13 @@ vi.mock("./mongodb.js", () => ({
       return {
         findOne: async ({ _id }: Doc) => store.get(_id) ?? null,
         replaceOne: async ({ _id }: Doc, doc: Doc) => void store.set(_id, { _id, ...doc }),
+        updateOne: async ({ _id }: Doc, update: Doc) => {
+          const existing = store.get(_id);
+          store.set(_id, {
+            ...(existing ?? { _id, ...update.$setOnInsert }),
+            ...update.$set,
+          });
+        },
         deleteOne: async ({ _id }: Doc) => void store.delete(_id),
         findOneAndUpdate: async (filter: Doc, update: Doc) => {
           const doc = store.get(filter._id);
@@ -94,6 +101,18 @@ describe("email codes", () => {
     expect(await errorCode(await post("/api/auth/otp/verify", { email, code }))).toBe("INVALID_CODE");
   });
 
+  it("creates an empty record at sign-in only when the customer ticked save", async () => {
+    await post("/api/auth/otp/send", { email });
+    await post("/api/auth/otp/verify", { email, code: lastCode() });
+    expect(stores.get("profiles")?.size ?? 0).toBe(0);
+
+    vi.setSystemTime(Date.now() + 61_000);
+    resetRateLimits();
+    await post("/api/auth/otp/send", { email });
+    await post("/api/auth/otp/verify", { email, code: lastCode(), remember: true });
+    expect([...stores.get("profiles")!.values()]).toHaveLength(1);
+  });
+
   it("never stores the email address or the code in clear", async () => {
     await post("/api/auth/otp/send", { email });
     const stored = JSON.stringify([...stores.get("email_otps")!.values()]);
@@ -156,10 +175,34 @@ describe("google sign-in", () => {
 
   it("turns a verified Google token into a session", async () => {
     vi.stubEnv("GOOGLE_CLIENT_ID", "client-id");
-    verifyGoogleCredential.mockResolvedValue(email);
+    verifyGoogleCredential.mockResolvedValue({ email, firstName: "Asha", lastName: "Rao" });
     const response = await post("/api/auth/google", { credential });
     expect(response.status).toBe(200);
     expect(readSessionEmail((await response.json()).data.token)).toBe(email);
+    expect(stores.get("profiles")?.size ?? 0).toBe(0);
+  });
+
+  it("creates the customer's record, with Google's names, only when they opted in", async () => {
+    vi.stubEnv("GOOGLE_CLIENT_ID", "client-id");
+    verifyGoogleCredential.mockResolvedValue({ email, firstName: "Asha", lastName: "Rao" });
+    await post("/api/auth/google", { credential, remember: true });
+    const [saved] = [...stores.get("profiles")!.values()];
+    expect(saved).toMatchObject({ firstName: "Asha", lastName: "Rao", phone: "" });
+    expect(JSON.stringify(saved)).not.toContain(email);
+  });
+
+  it("keeps what a returning customer already saved", async () => {
+    vi.stubEnv("GOOGLE_CLIENT_ID", "client-id");
+    verifyGoogleCredential.mockResolvedValue({ email, firstName: "Google", lastName: "Name" });
+    const headers = sessionHeader(email);
+    await app.request("/api/me/profile", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json", ...headers },
+      body: JSON.stringify({ firstName: "Asha", lastName: "Rao", phone: "+919876543210" }),
+    });
+    await post("/api/auth/google", { credential, remember: true });
+    const [saved] = [...stores.get("profiles")!.values()];
+    expect(saved).toMatchObject({ firstName: "Asha", lastName: "Rao", phone: "+919876543210" });
   });
 
   it("rejects a token Google did not issue for this app", async () => {

@@ -22,9 +22,27 @@ function token(
 beforeEach(() => vi.stubEnv("GOOGLE_CLIENT_ID", clientId));
 
 describe("verifyGoogleCredential", () => {
-  it("returns the lower-cased email of a valid token", async () => {
-    const credential = await token({ email: "Traveller@Gmail.com", email_verified: true });
-    expect(await verifyGoogleCredential(credential, keys)).toBe("traveller@gmail.com");
+  it("returns the lower-cased email and the names of a valid token", async () => {
+    const credential = await token({
+      email: "Traveller@Gmail.com",
+      email_verified: true,
+      given_name: "Asha",
+      family_name: "Rao",
+    });
+    expect(await verifyGoogleCredential(credential, keys)).toEqual({
+      email: "traveller@gmail.com",
+      firstName: "Asha",
+      lastName: "Rao",
+    });
+  });
+
+  it("returns empty names when Google does not share them", async () => {
+    const credential = await token({ email: "a@gmail.com", email_verified: true });
+    expect(await verifyGoogleCredential(credential, keys)).toEqual({
+      email: "a@gmail.com",
+      firstName: "",
+      lastName: "",
+    });
   });
 
   it("rejects an unverified email", async () => {

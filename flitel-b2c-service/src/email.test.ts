@@ -41,6 +41,17 @@ describe("sendEmail", () => {
     await expect(sendEmail(message)).rejects.toMatchObject({ status: 503 });
   });
 
+  it("falls back to the console in development when the provider rejects the address", async () => {
+    vi.stubEnv("SMTP_USER", "me@gmail.com");
+    vi.stubEnv("SMTP_PASSWORD", "app-password");
+    vi.stubEnv("OTP_DEV_ECHO", "true");
+    sendMail.mockRejectedValue(new Error("rejected"));
+    const log = vi.spyOn(console, "log").mockImplementation(() => {});
+    await expect(sendEmail(message)).resolves.toBeUndefined();
+    expect(log).toHaveBeenCalledWith(expect.stringContaining("123456"));
+    log.mockRestore();
+  });
+
   it("refuses when nothing is configured and the dev flag is off", async () => {
     await expect(sendEmail(message)).rejects.toMatchObject({ status: 503 });
     expect(sendMail).not.toHaveBeenCalled();

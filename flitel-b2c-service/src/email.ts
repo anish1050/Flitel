@@ -31,15 +31,34 @@ async function sendWithResend(message: Message, key: string): Promise<void> {
   if (!response?.ok) unavailable();
 }
 
-export async function sendEmail(message: Message): Promise<void> {
+async function sendWithConfiguredProvider(message: Message): Promise<boolean> {
   const smtpUser = process.env.SMTP_USER?.trim();
   const smtpPassword = process.env.SMTP_PASSWORD?.trim();
-  if (smtpUser && smtpPassword) return sendWithSmtp(message, smtpUser, smtpPassword);
-
+  if (smtpUser && smtpPassword) {
+    await sendWithSmtp(message, smtpUser, smtpPassword);
+    return true;
+  }
   const resendKey = process.env.RESEND_API_KEY?.trim();
-  if (resendKey) return sendWithResend(message, resendKey);
+  if (resendKey) {
+    await sendWithResend(message, resendKey);
+    return true;
+  }
+  return false;
+}
 
-  // Local development only; a server with no provider and without this flag refuses instead of leaking codes.
-  if (process.env.OTP_DEV_ECHO !== "true") unavailable();
-  console.log(`[dev email] to=${message.to} subject=${message.subject}\n${message.text}`);
+export async function sendEmail(message: Message): Promise<void> {
+  // Local development only. Without this flag a server with no working provider refuses instead of leaking codes.
+  const echoInstead = () => {
+    console.log(`[dev email] to=${message.to} subject=${message.subject}
+${message.text}`);
+  };
+  const devEcho = process.env.OTP_DEV_ECHO === "true";
+  try {
+    if (await sendWithConfiguredProvider(message)) return;
+  } catch (error) {
+    // Resend's test sender only reaches the account owner; the console keeps every other address testable.
+    if (!devEcho) throw error;
+  }
+  if (!devEcho) unavailable();
+  echoInstead();
 }
