@@ -19,9 +19,6 @@ export function SiteHeader() {
           <FlightLink className="nav-link" href="/hotels">
             Hotels
           </FlightLink>
-          <FlightLink className="nav-link" href="/#destinations">
-            Destinations
-          </FlightLink>
           <FlightLink className="nav-link" href="/#travel-made-simple">
             Why Flitel
           </FlightLink>
