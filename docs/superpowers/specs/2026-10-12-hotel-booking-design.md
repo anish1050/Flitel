@@ -52,9 +52,9 @@ Limits: search/rates bodies 4 KB, booking body 8 KB (the existing `/api/flights/
 
 1. **The browser never sets the amount.** The price charged is fixed by LiteAPI at prebook and bound to the card form's `secretKey`. The prebook response's `priceDifferencePercent`, `cancellationChanged` and `boardChanged` are shown to the customer, who must accept them before the card form appears.
 2. **One payment attempt books at most once.** `attemptId` (claimed in MongoDB) plus LiteAPI's `clientReference`. A new `attemptId` and a new prebook are created for every new payment attempt, because LiteAPI issues a new `transactionId` for each prebook.
-3. **Unknown is never "failed".** The SDK charges the card before the book call, so any outcome that is not proven (`confirmed`, or an explicit room-unavailable or invalid-request rejection) shows "We're checking your booking" with the reference and no retry button, and survives a reload (the attempt reference stays in the tab's sessionStorage).
+3. **Unknown is never "failed".** The SDK charges the card before the book call, so any outcome that is not proven (`confirmed`, or an explicit room-unavailable or invalid-request rejection) shows "We're checking your booking" with the reference and a "Check again" button that re-sends the same booking request. Re-sending is safe: the backend claim is once-only per prebook, so it either replays the recorded result or completes a booking that never reached the server. The guest details therefore stay in the tab's sessionStorage until a confirmed or failed answer arrives; an unclear answer, an unreachable backend or a reload never drops them, and a reload that finds them sends the request again.
 4. **Say what happens to the money.** On `ROOM_UNAVAILABLE` after payment the page says the booking could not be completed and that Flitel will arrange any refund, quoting the reference. This is a commitment, and is an open question for LiteAPI below.
-5. **Guest details never go in URLs, logs or MongoDB.** They live in the browser tab (sessionStorage) only while the customer is on the card form and its redirect, and are removed when the booking call is made.
+5. **Guest details never go in URLs, logs or MongoDB.** They live in the browser tab (sessionStorage) only while the customer is on the card form, its redirect and the booking call, and are removed once a confirmed or failed answer arrives.
 6. **Sandbox only.** `search` and `rates` refuse a response whose `sandbox` flag is not `true`; the SDK runs with `publicKey: "sandbox"`.
 7. **Card data never reaches Flitel.** The SDK's form handles it.
 
@@ -67,7 +67,7 @@ Limits: search/rates bodies 4 KB, booking body 8 KB (the existing `/api/flights/
 | Offer gone at prebook (`4040` outdated offer) | `410 OFFER_UNAVAILABLE` | "This room is no longer available" + back to the hotel's rooms |
 | Price, cancellation or board changed at prebook | `200` with the change flags | The new terms, re-confirmed before payment |
 | Room unavailable after payment | `410 ROOM_UNAVAILABLE` | Booking could not be completed; reference; Flitel will arrange any refund |
-| Timeout or unclear result | `202 checking` | "We're checking your booking"; no retry |
+| Timeout or unclear result | `202 checking` | "We're checking your booking"; "Check again" re-sends the same request |
 | Supplier down | `502/503` | "Hotels are unavailable right now. Nothing was booked." |
 | No `LITEAPI_KEY` | `503 LITEAPI_NOT_CONFIGURED` | "Hotel booking isn't available yet." |
 
