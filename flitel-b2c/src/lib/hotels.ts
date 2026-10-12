@@ -78,6 +78,19 @@ export function parseStayParams(
   return parsed.data;
 }
 
+export function defaultStay(from = new Date()): StayInput {
+  const checkin = new Date(from);
+  checkin.setDate(checkin.getDate() + 14);
+  const checkout = new Date(checkin);
+  checkout.setDate(checkout.getDate() + 2);
+  return {
+    destination: hotelDestinations[0].id,
+    checkin: formatCalendarDate(checkin),
+    checkout: formatCalendarDate(checkout),
+    adults: 2,
+  };
+}
+
 export function buildStayQuery(stay: StayInput): string {
   return new URLSearchParams({
     destination: stay.destination,

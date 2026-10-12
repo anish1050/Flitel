@@ -16,6 +16,9 @@ export function SiteHeader() {
           <FlightLink className="nav-link" href="/">
             Flights
           </FlightLink>
+          <FlightLink className="nav-link" href="/hotels">
+            Hotels
+          </FlightLink>
           <FlightLink className="nav-link" href="/#destinations">
             Destinations
           </FlightLink>
@@ -57,7 +60,7 @@ export function SiteFooter() {
           ? "Duffel test mode. Fares and schedules may be unrealistic."
           : "An early look at Flitel. All fares and schedules are examples."}
         <br />
-        No payments or bookings are available in this preview.
+        Test bookings run in test mode for flights and hotels. No real tickets or rooms are booked.
       </p>
       <a
         className="photo-credits"

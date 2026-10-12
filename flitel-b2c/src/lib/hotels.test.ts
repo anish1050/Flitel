@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   buildStayQuery,
+  defaultStay,
   findDestination,
   hotelDestinations,
   nightsBetween,
@@ -72,5 +73,13 @@ describe("stay query", () => {
 describe("prebook response", () => {
   it("requires the fields the card form needs", () => {
     expect(prebookSchema.safeParse({ prebookId: "p" }).success).toBe(false);
+  });
+});
+
+describe("default stay", () => {
+  it("starts 14 days ahead for two nights and passes its own validation", () => {
+    const stay = defaultStay(new Date(2026, 9, 12));
+    expect(stay).toMatchObject({ checkin: "2026-10-26", checkout: "2026-10-28", destination: "mumbai" });
+    expect(parseStayParams({ ...stay, adults: String(stay.adults) }, today)).toEqual(stay);
   });
 });
