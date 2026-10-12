@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
-import { Hotel, Info, Star } from "lucide-react";
+import Image from "next/image";
+import { ArrowRight, Hotel, Info, Star } from "lucide-react";
 import { HotelSearchForm } from "@/components/hotel-search-form";
 import { HotelsUnavailable } from "@/components/hotels-unavailable";
 import { FlightLink } from "@/components/flight-transition";
@@ -9,6 +10,8 @@ import { searchHotels } from "@/lib/hotel-api";
 import {
   buildStayQuery,
   defaultStay,
+  findDestination,
+  formatStayDates,
   nightsBetween,
   parseStayParams,
   type HotelSummary,
@@ -29,28 +32,36 @@ function HotelCard({ hotel, stay }: { hotel: HotelSummary; stay: StayInput }) {
         href={`/hotels/${encodeURIComponent(hotel.id)}?${buildStayQuery(stay)}`}
         className="hotel-card-link"
       >
-        {hotel.photo ? (
-          <img className="hotel-photo" src={hotel.photo} alt="" loading="lazy" />
-        ) : (
-          <span className="hotel-photo hotel-photo-empty" aria-hidden="true">
-            <Hotel size={30} />
-          </span>
-        )}
+        <span className="hotel-card-photo">
+          {hotel.photo ? (
+            <img className="hotel-photo" src={hotel.photo} alt="" loading="lazy" />
+          ) : (
+            <span className="hotel-photo hotel-photo-empty" aria-hidden="true">
+              <Hotel size={30} />
+            </span>
+          )}
+          <span className="hotel-card-shade" />
+          {Boolean(hotel.stars || hotel.rating) && (
+            <span className="hotel-card-stars">
+              <Star size={11} aria-hidden="true" />
+              {[hotel.stars ? `${hotel.stars} star` : "", hotel.rating ? `${hotel.rating}` : ""]
+                .filter(Boolean)
+                .join(" · ")}
+            </span>
+          )}
+          <strong className="hotel-card-name">{hotel.name}</strong>
+        </span>
         <span className="hotel-card-body">
-          <strong>{hotel.name}</strong>
-          <span className="hotel-meta">
-            {hotel.stars !== undefined && (
-              <span>
-                <Star size={13} aria-hidden="true" /> {hotel.stars} star
-              </span>
-            )}
-            {hotel.rating ? <span>Rated {hotel.rating}</span> : null}
-          </span>
           {hotel.address && <small>{hotel.address}</small>}
           {hotel.refundable && <span className="hotel-tag">Free cancellation</span>}
-          <span className="hotel-price">
-            from <strong>{formatPrice(hotel.price.amount, hotel.price.currency)}</strong> for{" "}
-            {nights} {nights === 1 ? "night" : "nights"}
+          <span className="hotel-card-footer">
+            <span className="hotel-price">
+              from <strong>{formatPrice(hotel.price.amount, hotel.price.currency)}</strong> for{" "}
+              {nights} {nights === 1 ? "night" : "nights"}
+            </span>
+            <span className="hotel-card-view">
+              View <ArrowRight size={14} aria-hidden="true" />
+            </span>
           </span>
         </span>
       </FlightLink>
@@ -78,12 +89,29 @@ async function Results({ stay }: { stay: StayInput }) {
         <p>Try different dates or another destination.</p>
       </div>
     );
+
+  const nights = nightsBetween(stay.checkin, stay.checkout);
+  const city = findDestination(stay.destination)?.label ?? "";
   return (
-    <ul className="hotel-grid" aria-label="Hotels">
-      {hotels.map((hotel) => (
-        <HotelCard key={hotel.id} hotel={hotel} stay={stay} />
-      ))}
-    </ul>
+    <>
+      <div className="hotel-results-head">
+        <div>
+          <span className="eyebrow">
+            {city.toUpperCase()} · {formatStayDates(stay.checkin, stay.checkout).toUpperCase()} ·{" "}
+            {nights} {nights === 1 ? "NIGHT" : "NIGHTS"}
+          </span>
+          <h2>
+            {hotels.length} {hotels.length === 1 ? "hotel" : "hotels"} for your dates
+          </h2>
+        </div>
+        <small>Cheapest first</small>
+      </div>
+      <ul className="hotel-grid" aria-label="Hotels">
+        {hotels.map((hotel) => (
+          <HotelCard key={hotel.id} hotel={hotel} stay={stay} />
+        ))}
+      </ul>
+    </>
   );
 }
 
@@ -104,25 +132,51 @@ export default async function HotelsPage({ searchParams }: { searchParams: Promi
     }
   }
 
+  const shownStay = stay ?? defaultStay();
+  const destination = findDestination(shownStay.destination);
+
   return (
-    <main id="main" className="details-page page-width">
-      <div className="details-title">
-        <div>
-          <span className="eyebrow">STAY SOMEWHERE NEW</span>
-          <h1>Find your hotel.</h1>
-          <p>Choose a destination and your dates.</p>
-        </div>
-        <span className="sample-badge">
+    <main id="main">
+      <section className="hero hero-stay" aria-labelledby="hotels-title">
+        {destination && (
+          <Image
+            src={destination.heroImage}
+            alt=""
+            fill
+            sizes="100vw"
+            loading="eager"
+            fetchPriority="high"
+            className="hero-image"
+          />
+        )}
+        <div className="hero-shade" />
+        <span className="sample-badge hero-badge">
           <Info size={14} /> Test bookings in the LiteAPI sandbox
         </span>
+        <div className="hero-content">
+          <span className="eyebrow hero-eyebrow">
+            <span /> STAY SOMEWHERE NEW
+          </span>
+          <h1 id="hotels-title">Stay in {destination?.label ?? "a new city"}.</h1>
+          <p>Choose your dates and we’ll find the rooms. Real hotels, real prices.</p>
+        </div>
+      </section>
+
+      <div className="home-search page-width">
+        <div className="search-tab">
+          <Hotel size={17} aria-hidden="true" /> Let’s find your stay
+        </div>
+        <HotelSearchForm stay={shownStay} today={today} />
       </div>
-      <HotelSearchForm stay={stay ?? defaultStay()} today={today} />
-      {problem && (
-        <p className="booking-problem" role="alert">
-          {problem}
-        </p>
-      )}
-      {stay && <Results stay={stay} />}
+
+      <div className="hotel-results page-width">
+        {problem && (
+          <p className="booking-problem" role="alert">
+            {problem}
+          </p>
+        )}
+        {stay && <Results stay={stay} />}
+      </div>
     </main>
   );
 }

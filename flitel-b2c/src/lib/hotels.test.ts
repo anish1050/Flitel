@@ -1,3 +1,5 @@
+import { existsSync } from "node:fs";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
   buildReserveQuery,
@@ -5,6 +7,7 @@ import {
   cancellationLabel,
   defaultStay,
   findDestination,
+  formatStayDates,
   hotelDestinations,
   nightsBetween,
   parseReserveParams,
@@ -20,6 +23,18 @@ describe("hotel destinations", () => {
     expect(findDestination("dubai")).toMatchObject({ countryCode: "AE", cityName: "Dubai" });
     expect(findDestination("atlantis")).toBeUndefined();
     expect(new Set(hotelDestinations.map(({ id }) => id)).size).toBe(hotelDestinations.length);
+  });
+
+  it("has a photograph on disk for every destination, so a missing file cannot ship", () => {
+    for (const { id, heroImage } of hotelDestinations) {
+      expect(heroImage, id).toMatch(/^\/images\/.+\.(jpg|png)$/);
+      expect(existsSync(join(process.cwd(), "public", heroImage)), `${id}: ${heroImage}`).toBe(true);
+    }
+  });
+
+  it("labels a stay's dates as a day-and-month range, whatever the server zone", () => {
+    expect(formatStayDates("2026-10-26", "2026-10-28")).toBe("26 Oct – 28 Oct");
+    expect(formatStayDates("2026-12-30", "2027-01-02")).toBe("30 Dec – 2 Jan");
   });
 });
 

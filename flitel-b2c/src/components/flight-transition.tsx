@@ -13,7 +13,7 @@ import {
   type ComponentProps,
   type ReactNode,
 } from "react";
-import { isNewPage } from "@/lib/navigation";
+import { shouldAnimateFlight } from "@/lib/navigation";
 
 const FlightNavigation = createContext({
   navigateTo: (_href: string) => {},
@@ -46,7 +46,7 @@ export function FlightTransition({ children }: { children: ReactNode }) {
         router.refresh();
         return;
       }
-      if (isNewPage(window.location.href, destination.href)) animateFlight();
+      if (shouldAnimateFlight(window.location.href, destination.href)) animateFlight();
       previousUrl.current = destination.href;
       router.push(href);
     },
@@ -56,7 +56,7 @@ export function FlightTransition({ children }: { children: ReactNode }) {
   useEffect(() => {
     previousUrl.current = window.location.href;
     function animateHistoryChange() {
-      if (isNewPage(previousUrl.current, window.location.href)) animateFlight();
+      if (shouldAnimateFlight(previousUrl.current, window.location.href)) animateFlight();
       previousUrl.current = window.location.href;
     }
     window.addEventListener("popstate", animateHistoryChange);

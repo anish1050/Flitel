@@ -6,17 +6,18 @@ export const HOTEL_NATIONALITY = "IN";
 const maxNights = 30;
 
 // LiteAPI's city names may need tuning once a key exists; keep them in this one table.
+// Credits for every heroImage live in public/images/SOURCES.md.
 export const hotelDestinations = [
-  { id: "mumbai", label: "Mumbai", cityName: "Mumbai", countryCode: "IN" },
-  { id: "new-delhi", label: "New Delhi", cityName: "New Delhi", countryCode: "IN" },
-  { id: "goa", label: "Goa", cityName: "Goa", countryCode: "IN" },
-  { id: "dubai", label: "Dubai", cityName: "Dubai", countryCode: "AE" },
-  { id: "london", label: "London", cityName: "London", countryCode: "GB" },
-  { id: "singapore", label: "Singapore", cityName: "Singapore", countryCode: "SG" },
-  { id: "paris", label: "Paris", cityName: "Paris", countryCode: "FR" },
-  { id: "bangkok", label: "Bangkok", cityName: "Bangkok", countryCode: "TH" },
-  { id: "santorini", label: "Santorini", cityName: "Santorini", countryCode: "GR" },
-  { id: "male", label: "Malé", cityName: "Malé", countryCode: "MV" },
+  { id: "mumbai", label: "Mumbai", cityName: "Mumbai", countryCode: "IN", heroImage: "/images/destinations/mumbai.jpg" },
+  { id: "new-delhi", label: "New Delhi", cityName: "New Delhi", countryCode: "IN", heroImage: "/images/destinations/new-delhi.jpg" },
+  { id: "goa", label: "Goa", cityName: "Goa", countryCode: "IN", heroImage: "/images/destinations/goa.jpg" },
+  { id: "dubai", label: "Dubai", cityName: "Dubai", countryCode: "AE", heroImage: "/images/destinations/dubai.jpg" },
+  { id: "london", label: "London", cityName: "London", countryCode: "GB", heroImage: "/images/destinations/london.jpg" },
+  { id: "singapore", label: "Singapore", cityName: "Singapore", countryCode: "SG", heroImage: "/images/destinations/singapore.jpg" },
+  { id: "paris", label: "Paris", cityName: "Paris", countryCode: "FR", heroImage: "/images/destinations/paris.jpg" },
+  { id: "bangkok", label: "Bangkok", cityName: "Bangkok", countryCode: "TH", heroImage: "/images/destinations/bangkok.jpg" },
+  { id: "santorini", label: "Santorini", cityName: "Santorini", countryCode: "GR", heroImage: "/images/santorini-hero.png" },
+  { id: "male", label: "Malé", cityName: "Malé", countryCode: "MV", heroImage: "/images/destinations/male.jpg" },
 ];
 
 export function findDestination(id: string) {
@@ -32,6 +33,13 @@ export type StayInput = {
 
 export function nightsBetween(checkin: string, checkout: string): number {
   return Math.round((Date.parse(checkout) - Date.parse(checkin)) / 86_400_000);
+}
+
+// UTC so the server's timezone cannot shift the day of a calendar date.
+export function formatStayDates(checkin: string, checkout: string): string {
+  const format = (date: string) =>
+    new Date(date).toLocaleDateString("en-GB", { day: "numeric", month: "short", timeZone: "UTC" });
+  return `${format(checkin)} – ${format(checkout)}`;
 }
 
 const adultsMessage = "Choose between 1 and 9 adults.";
