@@ -19,7 +19,7 @@ export function SiteHeader() {
           <FlightLink className="nav-link" href="/hotels">
             Hotels
           </FlightLink>
-          <FlightLink className="nav-link" href="/#travel-made-simple">
+          <FlightLink className="nav-link" href="/why-tripknot">
             Why TripKnot
           </FlightLink>
         </nav>
