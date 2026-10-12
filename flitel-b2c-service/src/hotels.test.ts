@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   buildLiteapiBook,
+  cancelTimeToUtcIso,
   classifyBookResponse,
   hotelBookingRequestSchema,
   normaliseBooking,
@@ -160,7 +161,38 @@ describe("summariseHotels", () => {
   });
 });
 
+describe("cancelTimeToUtcIso", () => {
+  it.each([
+    ["2026-11-05 10:00:00", "GMT", "2026-11-05T10:00:00Z"],
+    ["2026-11-05 10:00:00", "UTC", "2026-11-05T10:00:00Z"],
+    ["2026-11-05 10:00:00", "GMT+00:00", "2026-11-05T10:00:00Z"],
+    ["2026-11-05T10:00:00", undefined, "2026-11-05T10:00:00Z"],
+    ["2026-11-05T10:00:00Z", undefined, "2026-11-05T10:00:00Z"],
+    ["2026-11-05 15:30:00+05:30", "Asia/Kolkata", "2026-11-05T10:00:00Z"],
+    ["2026-11-05 10:00:00", "Asia/Kolkata", undefined],
+    ["soon", "GMT", undefined],
+    ["2026-13-45 10:00:00", "GMT", undefined],
+    [undefined, "GMT", undefined],
+  ])("reads %s (%s) as %s", (cancelTime, timezone, expected) => {
+    expect(cancelTimeToUtcIso(cancelTime, timezone)).toBe(expected);
+  });
+});
+
 describe("normaliseRooms", () => {
+  it("reads a zone-less GMT cancel time as UTC", () => {
+    const gmt = rate({
+      cancellationPolicies: {
+        cancelPolicyInfos: [{ cancelTime: "2026-11-05 10:00:00", timezone: "GMT" }],
+        refundableTag: "RFN",
+      },
+    });
+    const body = ratesBody({
+      data: [{ hotelId: "lp1", roomTypes: [roomType("o1", 100, [gmt])] }],
+    });
+
+    expect(normaliseRooms(body, "lp1").rooms[0].cancelBefore).toBe("2026-11-05T10:00:00Z");
+  });
+
   it("makes one room per room type, cheapest first", () => {
     const { rooms, hotel } = normaliseRooms(ratesBody(), "lp1");
 
@@ -610,6 +642,26 @@ describe("normaliseBooking", () => {
       hotelConfirmationCode: "HC-9",
     });
     expect(JSON.stringify(booking)).not.toMatch(/9876543210|7d1f1c0e/);
+  });
+
+  it("reads stored cancel times as UTC and drops ones in an unknown zone", () => {
+    const withTimes = {
+      data: {
+        ...stored.data,
+        cancellationPolicies: {
+          refundableTag: "RFN",
+          cancelPolicyInfos: [
+            { cancelTime: "2026-11-05 10:00:00", timezone: "GMT", amount: 0, currency: "INR" },
+            { cancelTime: "2026-11-06 10:00:00", timezone: "Asia/Kolkata", amount: 500, currency: "INR" },
+          ],
+        },
+      },
+    };
+
+    expect(normaliseBooking(withTimes).cancellation.cancelPolicyInfos).toEqual([
+      { cancelTime: "2026-11-05T10:00:00Z", amount: 0, currency: "INR" },
+      { cancelTime: undefined, amount: 500, currency: "INR" },
+    ]);
   });
 
   it("tolerates missing cancellation terms and confirmation code", () => {

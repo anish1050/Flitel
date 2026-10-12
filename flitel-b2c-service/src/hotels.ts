@@ -113,7 +113,7 @@ const rateSchema = z.looseObject({
     .looseObject({
       refundableTag: optionalString,
       cancelPolicyInfos: z
-        .array(z.looseObject({ cancelTime: optionalString }))
+        .array(z.looseObject({ cancelTime: optionalString, timezone: optionalString }))
         .nullish(),
     })
     .nullish(),
@@ -221,6 +221,26 @@ export function summariseHotels(raw: unknown): HotelSummary[] {
     .sort((a, b) => a.price.amount - b.price.amount);
 }
 
+const CANCEL_TIME = /^(\d{4}-\d{2}-\d{2})[ T](\d{2}:\d{2}:\d{2})(?:\.\d+)?(Z|[+-]\d{2}:?\d{2})?$/i;
+const UTC_ZONE = /^(GMT|UTC)(\+0{1,2}:?0{2})?$/i;
+
+// LiteAPI sends zone-less local times next to a separate `timezone` field.
+// Only zones we can prove are UTC are converted; anything else is unknown, never guessed.
+export function cancelTimeToUtcIso(cancelTime?: string, timezone?: string): string | undefined {
+  const match = cancelTime?.trim().match(CANCEL_TIME);
+  if (!match) return undefined;
+  const [, day, time, designator] = match;
+  if (!designator && timezone && !UTC_ZONE.test(timezone.trim())) return undefined;
+  const parsed = new Date(`${day}T${time}${designator ?? "Z"}`);
+  if (Number.isNaN(parsed.getTime())) return undefined;
+  return parsed.toISOString().replace(".000Z", "Z");
+}
+
+function firstCancelTimeUtc(rate?: z.infer<typeof rateSchema>): string | undefined {
+  const info = rate?.cancellationPolicies?.cancelPolicyInfos?.[0];
+  return cancelTimeToUtcIso(info?.cancelTime, info?.timezone);
+}
+
 function toRoom(roomType: PricedRoomType): Room {
   const rates = roomType.rates ?? [];
   const refundable = allRatesRefundable(roomType);
@@ -229,9 +249,7 @@ function toRoom(roomType: PricedRoomType): Room {
     name: rates[0]?.name || "Room",
     boardName: rates[0]?.boardName,
     refundable,
-    cancelBefore: refundable
-      ? rates[0]?.cancellationPolicies?.cancelPolicyInfos?.[0]?.cancelTime
-      : undefined,
+    cancelBefore: refundable ? firstCancelTimeUtc(rates[0]) : undefined,
     price: toPrice(roomType.offerRetailRate),
     taxesNotIncluded: rates
       .flatMap((rate) => rate.retailRate?.taxesAndFees ?? [])
@@ -497,6 +515,7 @@ const storedBookingSchema = z.looseObject({
           .array(
             z.looseObject({
               cancelTime: optionalString,
+              timezone: optionalString,
               amount: optionalNumber,
               currency: optionalString,
             }),
@@ -526,7 +545,7 @@ export function normaliseBooking(raw: unknown): HotelBooking {
     cancellation: {
       refundableTag: policies?.refundableTag,
       cancelPolicyInfos: (policies?.cancelPolicyInfos ?? []).map((info) => ({
-        cancelTime: info.cancelTime,
+        cancelTime: cancelTimeToUtcIso(info.cancelTime, info.timezone),
         amount: info.amount,
         currency: info.currency,
       })),

@@ -181,7 +181,9 @@ export type HotelBooking = z.infer<typeof hotelBookingSchema>;
 
 // UTC keeps the day and time independent of the server's timezone.
 function formatCancelTime(value: string): string | undefined {
-  const date = new Date(value);
+  // A zone-less time would be read as the server's local time, so pin it to UTC.
+  const hasZone = /(Z|[+-]\d{2}:?\d{2})$/i.test(value.trim());
+  const date = new Date(hasZone ? value : `${value.trim().replace(" ", "T")}Z`);
   if (Number.isNaN(date.getTime())) return undefined;
   const text = date.toLocaleString("en-GB", {
     day: "numeric",

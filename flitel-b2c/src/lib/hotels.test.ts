@@ -92,6 +92,12 @@ describe("cancellationLabel", () => {
     );
   });
 
+  it("reads zone-less and Z times as the same UTC moment, whatever the server zone", () => {
+    const expected = "Free cancellation until 5 November 2026 at 10:00 UTC";
+    expect(cancellationLabel(true, "2026-11-05 10:00:00")).toBe(expected);
+    expect(cancellationLabel(true, "2026-11-05T10:00:00Z")).toBe(expected);
+  });
+
   it("handles missing, unreadable and non-refundable terms", () => {
     expect(cancellationLabel(true, undefined)).toBe("Free cancellation");
     expect(cancellationLabel(true, "soon")).toBe("Free cancellation");
