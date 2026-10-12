@@ -128,7 +128,7 @@ export async function createHotelBooking(input: unknown): Promise<BackendAnswer>
   if (!hasFlightBackend())
     return {
       status: 503,
-      body: { error: { code: "HOTELS_UNAVAILABLE", message: "Hotel booking is not available yet." } },
+      body: { error: { code: "LITEAPI_NOT_CONFIGURED", message: "Hotel booking is not available yet." } },
     };
   try {
     const response = await fetch(`${backendUrl()}/api/hotel-bookings`, {

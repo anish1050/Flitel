@@ -1,9 +1,15 @@
 import { z } from "zod";
-import { contactSchema, nameSchema } from "./booking";
+import { contactSchema } from "./booking";
+
+// A hotel guest name is not matched against a passport, so it gets its own wording.
+const guestNameSchema = z
+  .string()
+  .trim()
+  .regex(/^[A-Za-z][A-Za-z' -]{0,49}$/, "Use letters only, for example Anish.");
 
 export const guestSchema = z.object({
-  firstName: nameSchema,
-  lastName: nameSchema,
+  firstName: guestNameSchema,
+  lastName: guestNameSchema,
   ...contactSchema.shape,
 });
 export type GuestInput = z.infer<typeof guestSchema>;
@@ -18,25 +24,22 @@ export type PendingHotelAttempt = {
 };
 
 // Guest details stay here until the return page gets a confirmed or failed answer and clears the entry.
-const storedAttemptSchema = z.union([
-  z.object({
-    state: z.literal("ready"),
-    pending: z.object({
-      attemptId: z.string(),
-      prebookId: z.string(),
-      transactionId: z.string(),
-      expectedTotal: z.number(),
-      expectedCurrency: z.string(),
-      holder: z.object({
-        firstName: z.string(),
-        lastName: z.string(),
-        email: z.string(),
-        phone: z.string(),
-      }),
+const storedAttemptSchema = z.object({
+  state: z.literal("ready"),
+  pending: z.object({
+    attemptId: z.string(),
+    prebookId: z.string(),
+    transactionId: z.string(),
+    expectedTotal: z.number(),
+    expectedCurrency: z.string(),
+    holder: z.object({
+      firstName: z.string(),
+      lastName: z.string(),
+      email: z.string(),
+      phone: z.string(),
     }),
   }),
-  z.object({ state: z.literal("checking") }),
-]);
+});
 
 const attemptKey = (attemptId: string) => `flitel-hotel:${attemptId}`;
 
@@ -74,7 +77,7 @@ export function savePendingHotelAttempt(storage: Storage | undefined, pending: P
 export function readPendingHotelAttempt(
   storage: Storage | undefined,
   attemptId: string,
-): { state: "ready"; pending: PendingHotelAttempt } | { state: "checking" } | undefined {
+): { state: "ready"; pending: PendingHotelAttempt } | undefined {
   try {
     const raw = storage?.getItem(attemptKey(attemptId));
     if (!raw) return undefined;
@@ -82,15 +85,6 @@ export function readPendingHotelAttempt(
     return parsed.success ? parsed.data : undefined;
   } catch {
     return undefined;
-  }
-}
-
-export function markHotelAttemptChecking(storage: Storage | undefined, attemptId: string) {
-  try {
-    storage?.setItem(attemptKey(attemptId), JSON.stringify({ state: "checking" }));
-  } catch {
-    // Guest details must not linger if the marker cannot replace them.
-    clearHotelAttempt(storage, attemptId);
   }
 }
 

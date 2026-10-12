@@ -10,12 +10,6 @@ export default function HotelPaymentReturn() {
   if (!hasFlightBackend()) return <HotelsUnavailable />;
   return (
     <main id="main" className="details-page page-width">
-      <div className="details-title">
-        <div>
-          <span className="eyebrow">PAYMENT RECEIVED</span>
-          <h1>Your hotel booking</h1>
-        </div>
-      </div>
       <Suspense>
         <HotelComplete />
       </Suspense>

@@ -40,12 +40,30 @@ async function sendBooking(pending: PendingHotelAttempt) {
   const response = await fetch("/api/hotel-bookings", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ attemptId, prebookId, transactionId, expectedTotal, expectedCurrency, holder }),
+    body: JSON.stringify({
+      attemptId,
+      prebookId,
+      transactionId,
+      expectedTotal,
+      expectedCurrency,
+      holder,
+    }),
     cache: "no-store",
   }).catch(() => undefined);
   // No response means the booking may exist, which classifies as checking.
   const body: unknown = await response?.json().catch(() => null);
   return classifyHotelBooking(response?.status ?? 0, body);
+}
+
+function Heading({ eyebrow }: { eyebrow: string }) {
+  return (
+    <div className="details-title">
+      <div>
+        <span className="eyebrow">{eyebrow}</span>
+        <h1>Your hotel booking</h1>
+      </div>
+    </div>
+  );
 }
 
 export function HotelComplete() {
@@ -98,59 +116,76 @@ export function HotelComplete() {
     </p>
   );
 
+  const received = <Heading eyebrow="PAYMENT RECEIVED" />;
   if (view.kind === "loading" || view.kind === "confirming")
     return (
-      <Panel title="Confirming your booking…">
-        <p>Please keep this page open while we confirm your room with the hotel.</p>
-      </Panel>
+      <>
+        {received}
+        <Panel title="Confirming your booking…">
+          <p>Please keep this page open while we confirm your room with the hotel.</p>
+        </Panel>
+      </>
     );
   if (view.kind === "checking") {
     const { pending } = view;
     return (
-      <Panel title="We’re checking your booking">
-        <p>
-          Your payment went through and we are confirming the room. Please keep this reference. If
-          this stays on screen, press Check again. Please don’t book or pay again.
-        </p>
-        {referenceLine}
-        {pending && (
-          <button type="button" className="button button-blue" onClick={() => void submitBooking(pending)}>
-            Check again
-          </button>
-        )}
-      </Panel>
+      <>
+        {received}
+        <Panel title="We’re checking your booking">
+          <p>
+            Your payment went through and we are confirming the room. Please keep this reference. If
+            this stays on screen, press Check again. Please don’t book or pay again.
+          </p>
+          {referenceLine}
+          {pending && (
+            <button
+              type="button"
+              className="button button-blue"
+              onClick={() => void submitBooking(pending)}
+            >
+              Check again
+            </button>
+          )}
+        </Panel>
+      </>
     );
   }
   if (view.kind === "failed")
     return (
+      <>
+        {received}
+        <section className="itinerary-panel booking-panel" role="alert">
+          <div className="panel-heading">
+            <span>We couldn’t complete this booking</span>
+          </div>
+          <div className="itinerary-body booking-checking">
+            <p>{view.message}</p>
+            {referenceLine}
+            <Link href="/hotels" className="button button-blue">
+              Search hotels
+            </Link>
+          </div>
+        </section>
+      </>
+    );
+  return (
+    <>
+      <Heading eyebrow="HOTEL BOOKING" />
       <section className="itinerary-panel booking-panel" role="alert">
         <div className="panel-heading">
-          <span>We couldn’t complete this booking</span>
+          <span>We couldn’t find this payment attempt</span>
         </div>
         <div className="itinerary-body booking-checking">
-          <p>{view.message}</p>
+          <p>
+            This page only works in the browser tab where the payment started. If your card was
+            charged, please keep your payment receipt and contact us.
+          </p>
           {referenceLine}
           <Link href="/hotels" className="button button-blue">
             Search hotels
           </Link>
         </div>
       </section>
-    );
-  return (
-    <section className="itinerary-panel booking-panel" role="alert">
-      <div className="panel-heading">
-        <span>We couldn’t find this payment attempt</span>
-      </div>
-      <div className="itinerary-body booking-checking">
-        <p>
-          This page only works in the browser tab where the payment started. If your card was
-          charged, please keep your payment receipt and contact us.
-        </p>
-        {referenceLine}
-        <Link href="/hotels" className="button button-blue">
-          Search hotels
-        </Link>
-      </div>
-    </section>
+    </>
   );
 }

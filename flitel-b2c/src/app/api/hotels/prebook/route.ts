@@ -5,12 +5,12 @@ import { readJsonBody } from "@/lib/request-body";
 export const maxDuration = 40;
 
 const prebookBodySchema = z.object({
-  offerId: z.string().regex(/^[A-Za-z0-9_=+/.-]{8,1500}$/),
+  offerId: z.string().regex(/^[A-Za-z0-9_=+/.-]{8,4000}$/),
 });
 const noStore = { "Cache-Control": "no-store" };
 
 export async function POST(request: Request) {
-  const body = await readJsonBody(request, 2 * 1024);
+  const body = await readJsonBody(request, 6 * 1024);
   if ("tooLarge" in body)
     return Response.json(
       { error: { code: "REQUEST_TOO_LARGE", message: "The request is too large." } },

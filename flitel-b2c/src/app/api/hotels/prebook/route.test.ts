@@ -12,7 +12,7 @@ describe("prebook proxy", () => {
   beforeEach(() => prebookRoom.mockReset());
 
   it("rejects an oversized body before forwarding it", async () => {
-    const response = await post("x".repeat(3 * 1024));
+    const response = await post("x".repeat(7 * 1024));
     expect(response.status).toBe(413);
     expect(prebookRoom).not.toHaveBeenCalled();
   });
@@ -26,6 +26,14 @@ describe("prebook proxy", () => {
       expect(prebookRoom).not.toHaveBeenCalled();
     },
   );
+
+  it("accepts a long valid offer id", async () => {
+    prebookRoom.mockResolvedValue({ status: 200, body: { data: {} } });
+    const offerId = "a".repeat(3500);
+    const response = await post(JSON.stringify({ offerId }));
+    expect(response.status).toBe(200);
+    expect(prebookRoom).toHaveBeenCalledWith(offerId);
+  });
 
   it("forwards only the offer id and returns the backend status uncached", async () => {
     prebookRoom.mockResolvedValue({ status: 410, body: { error: { code: "OFFER_UNAVAILABLE" } } });

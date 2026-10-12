@@ -144,12 +144,12 @@ describe("hotel booking call", () => {
     expect(await createHotelBooking({})).toEqual({ status: 202, body: { data: { status: "checking" } } });
   });
 
-  it("answers 503 HOTELS_UNAVAILABLE without a backend", async () => {
+  it("answers 503 LITEAPI_NOT_CONFIGURED without a backend", async () => {
     stubBackend(Response.json({}));
     vi.stubEnv("FLITEL_API_URL", "");
     expect(await createHotelBooking({})).toMatchObject({
       status: 503,
-      body: { error: { code: "HOTELS_UNAVAILABLE" } },
+      body: { error: { code: "LITEAPI_NOT_CONFIGURED" } },
     });
   });
 });

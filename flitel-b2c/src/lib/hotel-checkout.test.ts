@@ -96,9 +96,6 @@ describe("resolveReturnState", () => {
     expect(resolveReturnState({ ...params, tid: null }, { state: "ready", pending })).toEqual({ kind: "missing" });
   });
 
-  it("keeps the checking marker", () => {
-    expect(resolveReturnState(params, { state: "checking" })).toEqual({ kind: "checking" });
-  });
 });
 
 describe("shouldKeepAttempt", () => {

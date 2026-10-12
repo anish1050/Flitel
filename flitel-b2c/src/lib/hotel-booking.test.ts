@@ -4,7 +4,6 @@ import {
   classifyHotelBooking,
   clearHotelAttempt,
   guestSchema,
-  markHotelAttemptChecking,
   readPendingHotelAttempt,
   savePendingHotelAttempt,
   type PendingHotelAttempt,
@@ -49,8 +48,8 @@ describe("guest details", () => {
     expect(result.success).toBe(false);
     if (result.success) return;
     expect(fieldErrors(result.error)).toEqual({
-      firstName: "Use English letters as shown on the passport.",
-      lastName: "Use English letters as shown on the passport.",
+      firstName: "Use letters only, for example Anish.",
+      lastName: "Use letters only, for example Anish.",
       email: "Enter a valid email address.",
       phone: "Use the international format, for example +919876543210.",
     });
@@ -77,24 +76,6 @@ describe("pending attempt storage", () => {
     expect(storage.getItem(`flitel-hotel:${pending.attemptId}`)).not.toContain("sk_live");
   });
 
-  it("removes the guest details when the checking marker cannot be written", () => {
-    const storage = fake();
-    savePendingHotelAttempt(storage, pending);
-    storage.setItem = () => {
-      throw new Error("quota");
-    };
-    markHotelAttemptChecking(storage, pending.attemptId);
-    expect(storage.getItem(`flitel-hotel:${pending.attemptId}`)).toBeNull();
-  });
-
-  it("replaces the guest details with a checking marker", () => {
-    const storage = fake();
-    savePendingHotelAttempt(storage, pending);
-    markHotelAttemptChecking(storage, pending.attemptId);
-    expect(readPendingHotelAttempt(storage, pending.attemptId)).toEqual({ state: "checking" });
-    expect(storage.getItem(`flitel-hotel:${pending.attemptId}`)).not.toContain("asha@example.com");
-  });
-
   it("clears an attempt and reads unknown attempts as undefined", () => {
     const storage = fake();
     savePendingHotelAttempt(storage, pending);
@@ -106,7 +87,6 @@ describe("pending attempt storage", () => {
   it("never throws when storage is missing or blocked", () => {
     for (const storage of [undefined, throwing]) {
       expect(() => savePendingHotelAttempt(storage, pending)).not.toThrow();
-      expect(() => markHotelAttemptChecking(storage, pending.attemptId)).not.toThrow();
       expect(() => clearHotelAttempt(storage, pending.attemptId)).not.toThrow();
       expect(readPendingHotelAttempt(storage, pending.attemptId)).toBeUndefined();
     }

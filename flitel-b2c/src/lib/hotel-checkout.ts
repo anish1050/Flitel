@@ -34,11 +34,10 @@ export function describePrebookChanges(
   return changes;
 }
 
-type StoredAttempt = { state: "ready"; pending: PendingHotelAttempt } | { state: "checking" } | undefined;
+type StoredAttempt = { state: "ready"; pending: PendingHotelAttempt } | undefined;
 
 export type ReturnState =
   | { kind: "missing" }
-  | { kind: "checking" }
   | { kind: "ready"; pending: PendingHotelAttempt };
 
 /** The URL is only trusted when it names the same prebook and transaction the tab stored. */
@@ -47,7 +46,6 @@ export function resolveReturnState(
   stored: StoredAttempt,
 ): ReturnState {
   if (!params.attempt || !stored) return { kind: "missing" };
-  if (stored.state === "checking") return { kind: "checking" };
   const { pending } = stored;
   const matches =
     pending.attemptId === params.attempt &&
