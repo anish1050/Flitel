@@ -299,10 +299,14 @@ export const prebookRequestSchema = z.object({
   offerId: z.string().regex(/^[A-Za-z0-9_=+/.-]{8,4000}$/),
 });
 
+// Shared so a prebook the book call would reject is refused before the customer reaches the card form.
+const prebookIdPattern = /^[A-Za-z0-9_-]{4,100}$/;
+const transactionIdPattern = /^[A-Za-z0-9_-]{4,200}$/;
+
 export const hotelBookingRequestSchema = z.object({
   attemptId: z.uuid(),
-  prebookId: z.string().regex(/^[A-Za-z0-9_-]{4,100}$/),
-  transactionId: z.string().regex(/^[A-Za-z0-9_-]{4,200}$/),
+  prebookId: z.string().regex(prebookIdPattern),
+  transactionId: z.string().regex(transactionIdPattern),
   expectedTotal: z.number().positive(),
   expectedCurrency: z.string().regex(/^[A-Z]{3}$/),
   holder: z.object({
@@ -331,8 +335,8 @@ export type Prebook = {
 // Every field here is shown to the customer or sent to the card form, so none is defaulted.
 const prebookSchema = z.looseObject({
   data: z.looseObject({
-    prebookId: z.string().min(1),
-    transactionId: z.string().min(1),
+    prebookId: z.string().regex(prebookIdPattern),
+    transactionId: z.string().regex(transactionIdPattern),
     secretKey: z.string().min(1),
     hotelId: z.string().min(1),
     checkin: z.string().min(1),
@@ -435,8 +439,8 @@ export function classifyBookResponse(result: LiteapiResult | "unreachable"): Boo
   if (status === 401 || status === 403) return { kind: "not-authorised" };
 
   const code = liteapiErrorCode(body);
-  // A 5xx carrying a room-gone code is not proof, so only client-error replies count.
-  if (status === 410 || (status < 500 && code !== undefined && roomGoneCodes.has(code))) {
+  // Only these exact statuses count: a 2xx or 5xx that merely carries the code is not proof.
+  if (status === 410 || (status === 400 && code !== undefined && roomGoneCodes.has(code))) {
     return { kind: "room-unavailable" };
   }
   if (status === 400 && code !== undefined && invalidRequestCodes.has(code)) {
@@ -444,6 +448,15 @@ export function classifyBookResponse(result: LiteapiResult | "unreachable"): Boo
   }
   // The card is charged before the book call, so an unproven outcome must never be reported as failed.
   return { kind: "unknown" };
+}
+
+export const attemptReferencePattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+// A booking id alone must not reveal guest details: only the attempt that created it may read it back.
+export function bookingBelongsToAttempt(raw: unknown, attemptId: string): boolean {
+  const reference = (raw as { data?: { clientReference?: unknown } } | null)?.data
+    ?.clientReference;
+  return typeof reference === "string" && reference.toLowerCase() === attemptId.toLowerCase();
 }
 
 export type HotelBooking = {

@@ -413,11 +413,12 @@ const prebookResponse = (changes: Record<string, unknown> = {}) => ({
   sandbox: true,
 });
 const bookResponse = { data: { bookingId: "bk_1", status: "CONFIRMED" }, sandbox: true };
+const ref = "7d1f1c0e-2c1f-4c4e-9f33-0f6a2c0b5a11";
 const storedBooking = {
   data: {
     bookingId: "bk_1",
     status: "CONFIRMED",
-    clientReference: "ignored",
+    clientReference: ref,
     hotelConfirmationCode: "HC-9",
     hotel: { hotelId: "lp1", name: "Taj Example" },
     checkin: "2026-11-01",
@@ -500,6 +501,16 @@ describe("POST /api/hotels/prebook", () => {
         "LITEAPI_INVALID_RESPONSE",
       ],
       [
+        () => Response.json(prebookResponse({ transactionId: "tr.456" })),
+        502,
+        "LITEAPI_INVALID_RESPONSE",
+      ],
+      [
+        () => Response.json(prebookResponse({ transactionId: "t".repeat(201) })),
+        502,
+        "LITEAPI_INVALID_RESPONSE",
+      ],
+      [
         () => Response.json({ ...prebookResponse(), sandbox: false }),
         503,
         "LITEAPI_LIVE_REFUSED",
@@ -534,7 +545,7 @@ const guest = {
 };
 const hotelBooking = (changes: Record<string, unknown> = {}) => ({
   attemptId: crypto.randomUUID(),
-  prebookId: "pb_123",
+  prebookId: `pb_${crypto.randomUUID()}`,
   transactionId: "tr_456",
   expectedTotal: 27000,
   expectedCurrency: "INR",
@@ -542,6 +553,8 @@ const hotelBooking = (changes: Record<string, unknown> = {}) => ({
   ...changes,
 });
 const placeBooking = (body: unknown) => post("/api/hotel-bookings", body);
+const attemptFor = (request: { prebookId: string }) =>
+  attempts.get(`hotel:${request.prebookId}`);
 
 describe("POST /api/hotel-bookings", () => {
   it("books once, answers with the booking id and replays it for the same attempt", async () => {
@@ -555,7 +568,7 @@ describe("POST /api/hotel-bookings", () => {
     const [url, init] = bookCalls()[0];
     expect(url).toBe("https://book.liteapi.travel/v3.0/rates/book");
     expect(JSON.parse(String(init?.body))).toEqual({
-      prebookId: "pb_123",
+      prebookId: request.prebookId,
       clientReference: request.attemptId,
       holder: guest,
       guests: [
@@ -572,9 +585,9 @@ describe("POST /api/hotel-bookings", () => {
     const repeat = await placeBooking(request);
     expect(await repeat.json()).toEqual({ data: { bookingId: "bk_1" } });
     expect(bookCalls()).toHaveLength(1);
-    expect(attempts.get(request.attemptId)).toMatchObject({
-      _id: request.attemptId,
-      offerId: "pb_123",
+    expect([...attempts.keys()]).toEqual([`hotel:${request.prebookId}`]);
+    expect(attemptFor(request)).toMatchObject({
+      offerId: request.prebookId,
       amount: "27000",
       currency: "INR",
       status: "confirmed",
@@ -582,6 +595,67 @@ describe("POST /api/hotel-bookings", () => {
     });
     expect(JSON.stringify([...attempts.values()])).not.toMatch(
       /Priya|Sharma|example\.com|9876543210/,
+    );
+  });
+
+  it("books one prebook once, even for a second attemptId", async () => {
+    bookingReplies();
+    const first = hotelBooking();
+    const second = hotelBooking({ prebookId: first.prebookId });
+
+    expect((await placeBooking(first)).status).toBe(200);
+    const replay = await placeBooking(second);
+
+    expect(replay.status).toBe(200);
+    expect(await replay.json()).toEqual({ data: { bookingId: "bk_1" } });
+    expect(bookCalls()).toHaveLength(1);
+    expect(attempts.size).toBe(1);
+  });
+
+  it("replays an unknown outcome to a second attemptId without calling LiteAPI", async () => {
+    bookingReplies({ book: () => new Response("boom", { status: 500 }) });
+    const first = hotelBooking();
+
+    await placeBooking(first);
+    const replay = await placeBooking(hotelBooking({ prebookId: first.prebookId }));
+
+    expect(replay.status).toBe(202);
+    expect(bookCalls()).toHaveLength(1);
+  });
+
+  it("never tells the customer nothing was booked after payment", async () => {
+    const messages: string[] = [];
+    const collect = async (response: Response) => {
+      messages.push((await response.json()).error.message);
+    };
+    const failures: LiteapiReply[] = [
+      () => Response.json(errorBody(4003), { status: 400 }),
+      () => Response.json(errorBody(4012), { status: 410 }),
+      () => Response.json({}, { status: 401 }),
+    ];
+    for (const book of failures) {
+      fetchMock.mockReset();
+      bookingReplies({ book });
+      const request = hotelBooking();
+      await collect(await placeBooking(request));
+      await collect(await placeBooking(request));
+    }
+    for (const unavailable of ["down", "failInsert"] as const) {
+      mongo[unavailable] = true;
+      await collect(await placeBooking(hotelBooking()));
+      mongo[unavailable] = false;
+    }
+
+    expect(messages).toHaveLength(8);
+    for (const message of messages) expect(message).not.toMatch(/nothing was booked/i);
+    expect(new Set(messages)).toEqual(
+      new Set([
+        "The hotel could not accept these details.",
+        "This booking could not be completed. Please keep your reference.",
+        "This room is no longer available. Please keep your reference.",
+        "Hotel booking is unavailable right now. Please keep your reference.",
+        "We couldn't process this booking right now. Please keep your reference.",
+      ]),
     );
   });
 
@@ -603,7 +677,7 @@ describe("POST /api/hotel-bookings", () => {
       const response = await placeBooking(request);
       expect(response.status).toBe(202);
       expect(await response.json()).toEqual({ data: { status: "checking" } });
-      expect(attempts.get(request.attemptId)?.status).toBe("unknown");
+      expect(attemptFor(request)?.status).toBe("unknown");
 
       const repeat = await placeBooking(request);
       expect(repeat.status).toBe(202);
@@ -625,7 +699,7 @@ describe("POST /api/hotel-bookings", () => {
 
       const response = await placeBooking(request);
       expect([response.status, (await response.json()).error.code]).toEqual([status, code]);
-      expect(attempts.get(request.attemptId)?.status).toBe("failed");
+      expect(attemptFor(request)?.status).toBe("failed");
 
       const repeat = await placeBooking(request);
       expect(repeat.status).toBe(422);
@@ -642,7 +716,7 @@ describe("POST /api/hotel-bookings", () => {
     const first = await placeBooking(request);
     expect(first.status).toBe(200);
     expect(await first.json()).toEqual({ data: { bookingId: "bk_1" } });
-    expect(attempts.get(request.attemptId)?.status).toBe("pending");
+    expect(attemptFor(request)?.status).toBe("pending");
 
     const repeat = await placeBooking(request);
     expect(repeat.status).toBe(202);
@@ -653,7 +727,10 @@ describe("POST /api/hotel-bookings", () => {
   it("treats a lost claim race as checking and never books", async () => {
     bookingReplies();
     const request = hotelBooking();
-    attempts.set(request.attemptId, { _id: request.attemptId, status: "pending" });
+    attempts.set(`hotel:${request.prebookId}`, {
+      _id: `hotel:${request.prebookId}`,
+      status: "pending",
+    });
     mongo.hideNextLookup = true;
 
     const response = await placeBooking(request);
@@ -712,10 +789,13 @@ describe("POST /api/hotel-bookings", () => {
 });
 
 describe("GET /api/hotel-bookings/:bookingId", () => {
-  it("reads the booking back without the phone number", async () => {
+  const readBack = (id: string, query = `?ref=${ref}`) =>
+    app.request(`/api/hotel-bookings/${id}${query}`);
+
+  it("returns the booking for the attempt that created it, without the phone", async () => {
     bookingReplies();
 
-    const response = await app.request("/api/hotel-bookings/bk_1");
+    const response = await readBack("bk_1");
 
     expect(response.status).toBe(200);
     const text = await response.text();
@@ -734,25 +814,70 @@ describe("GET /api/hotel-bookings/:bookingId", () => {
       },
     });
     expect(text).not.toContain("9876543210");
+    expect(text).not.toContain(ref);
     expect(fetchMock.mock.calls[0][0]).toBe("https://book.liteapi.travel/v3.0/bookings/bk_1");
   });
 
-  it("maps a missing booking, a bad id and supplier failures", async () => {
-    bookingReplies();
-    expect((await app.request("/api/hotel-bookings/a%20b")).status).toBe(400);
-    expect((await app.request("/api/hotel-bookings/ab")).status).toBe(400);
+  it("answers 404 for a booking that belongs to another attempt, without revealing it", async () => {
+    const other = "11111111-2222-4333-8444-555555555555";
+    for (const stored of [
+      { data: { ...storedBooking.data, clientReference: other } },
+      { data: { ...storedBooking.data, clientReference: undefined } },
+    ]) {
+      fetchMock.mockReset();
+      bookingReplies({ bookings: () => Response.json(stored) });
+      const response = await readBack("bk_1");
+      expect(response.status).toBe(404);
+      const text = await response.text();
+      expect(JSON.parse(text).error.code).toBe("BOOKING_NOT_FOUND");
+      expect(text).not.toMatch(/Priya|Taj/);
+    }
+  });
 
+  it("matches the reference case-insensitively", async () => {
+    bookingReplies();
+    expect((await readBack("bk_1", `?ref=${ref.toUpperCase()}`)).status).toBe(200);
+  });
+
+  it("needs a valid id and a UUID reference before calling LiteAPI", async () => {
+    bookingReplies();
+    expect((await readBack("a%20b")).status).toBe(400);
+    expect((await readBack("ab")).status).toBe(400);
+    for (const query of ["", "?ref=", "?ref=bk_1", "?ref=not-a-uuid"]) {
+      const response = await readBack("bk_1", query);
+      expect(response.status).toBe(400);
+      expect((await response.json()).error.code).toBe("INVALID_BOOKING_REF");
+    }
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("maps a missing booking and supplier failures", async () => {
     const cases: [LiteapiReply, number, string][] = [
       [() => new Response(null, { status: 404 }), 404, "BOOKING_NOT_FOUND"],
       [() => new Response(null, { status: 204 }), 404, "BOOKING_NOT_FOUND"],
+      [
+        () =>
+          Response.json({ error: { code: 4041, message: "Booking Not Found" } }, { status: 400 }),
+        404,
+        "BOOKING_NOT_FOUND",
+      ],
+      [
+        () => Response.json({ error: { message: "booking not found" } }, { status: 200 }),
+        404,
+        "BOOKING_NOT_FOUND",
+      ],
       [() => new Response("boom", { status: 500 }), 502, "HOTELS_UNAVAILABLE"],
       [() => Promise.reject(new DOMException("t", "TimeoutError")), 502, "HOTELS_UNAVAILABLE"],
-      [() => Response.json({ data: {} }), 502, "LITEAPI_INVALID_RESPONSE"],
+      [
+        () => Response.json({ data: { clientReference: ref } }),
+        502,
+        "LITEAPI_INVALID_RESPONSE",
+      ],
     ];
     for (const [bookings, status, code] of cases) {
       fetchMock.mockReset();
       bookingReplies({ bookings });
-      const response = await app.request("/api/hotel-bookings/bk_1");
+      const response = await readBack("bk_1");
       expect([response.status, (await response.json()).error.code]).toEqual([status, code]);
     }
   });

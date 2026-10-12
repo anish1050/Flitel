@@ -410,6 +410,18 @@ describe("normalisePrebook", () => {
     expect(() => normalisePrebook(null)).toThrow();
     expect(() => normalisePrebook({ data: {} })).toThrow();
   });
+
+  it("throws on ids the book call would reject, before the card form", () => {
+    for (const changes of [
+      { transactionId: "tr.456" },
+      { transactionId: "t".repeat(201) },
+      { transactionId: "abc" },
+      { prebookId: "pb 123" },
+      { prebookId: "p".repeat(101) },
+    ]) {
+      expect(() => normalisePrebook(prebookBody(changes))).toThrow();
+    }
+  });
 });
 
 const holder = {
@@ -543,6 +555,13 @@ describe("classifyBookResponse", () => {
       [404, null],
       [429, null],
       [201, confirmed],
+      [200, error(2013)],
+      [201, error(4012)],
+      [502, error(2013)],
+      [404, error(4012)],
+      [409, error(2013)],
+      [429, error(4012)],
+      [302, error(2013)],
     ] as const) {
       expect(classifyBookResponse(reply(status, body))).toEqual({ kind: "unknown" });
     }

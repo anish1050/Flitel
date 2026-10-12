@@ -41,7 +41,7 @@ Import the [Postman collection](../docs/Flitel%20B2C%20API.postman_collection.js
 | `POST /api/hotels/:hotelId/rates`      | `{ "data": { "hotel": {...}, "rooms": [...] } }`                                            |
 | `POST /api/hotels/prebook`             | `{ "data": { "prebookId", "transactionId", "secretKey", "price", ... } }`, or `410 OFFER_UNAVAILABLE` |
 | `POST /api/hotel-bookings`             | `{ "data": { "bookingId": "..." } }`, or `202 { "data": { "status": "checking" } }` when the outcome is unknown |
-| `GET /api/hotel-bookings/:bookingId`   | `{ "data": <booking, no phone> }`, or `404 BOOKING_NOT_FOUND`                               |
+| `GET /api/hotel-bookings/:bookingId?ref=<attemptId>` | `{ "data": <booking, no phone> }` only when its `clientReference` equals `ref`, otherwise `404 BOOKING_NOT_FOUND` |
 
 `POST /api/flights/offers/:id/refresh` takes the search body, runs a fresh uncached search and returns the offer for the same flight (same carrier, flight number and departure times; same fare brand when available, else the cheapest) so an unavailable fare can be replaced.
 
@@ -73,7 +73,7 @@ Errors use `{ "error": { "code": "...", "message": "..." } }`. Invalid local inp
 
 Hotel search, rooms, prebook and booking use the LiteAPI **sandbox** only (`LITEAPI_KEY`, server side); a response whose `sandbox` flag is present and not `true` is refused. `POST /api/hotels/prebook` fixes the price and returns the `transactionId` and `secretKey` for LiteAPI's payment form. That form charges the card before `POST /api/hotel-bookings` is called, and Flitel never sees card data.
 
-Booking is once-only per `attemptId`: the attempt is claimed in `booking_attempts` before the book call (its `offerId` field holds the prebook id, `orderId` the booking id) and the same id is sent as LiteAPI's `clientReference`. Only a `CONFIRMED` reply or an explicit rejection (invalid request, room unavailable, not authorised) is recorded as such. Anything else, including timeouts and 5xx, is `unknown` and answers `202 checking`, and a repeat never calls LiteAPI again. Guest details are never stored or logged.
+Booking is once-only per prebook: the attempt is claimed in `booking_attempts` under `_id` `hotel:<prebookId>` before the book call (its `offerId` field holds the prebook id, `orderId` the booking id), so a second `attemptId` for the same prebook replays the first result. The `attemptId` is sent as LiteAPI's `clientReference`, and the booking can only be read back with it (`?ref=`). Only a `CONFIRMED` reply or an explicit rejection (invalid request, room unavailable, not authorised) is recorded as such. Anything else, including timeouts and 5xx, is `unknown` and answers `202 checking`, and a repeat never calls LiteAPI again. Guest details are never stored or logged.
 
 ## Progressive search and cache
 
