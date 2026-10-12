@@ -59,7 +59,7 @@ export function HotelComplete() {
 
   // The ready attempt stays stored until the answer is proven: the card is already charged, so a
   // reload or "Check again" must be able to send the same request again (the backend claims it once).
-  async function confirm(pending: PendingHotelAttempt) {
+  async function submitBooking(pending: PendingHotelAttempt) {
     if (sending.current) return;
     sending.current = true;
     setView({ kind: "confirming" });
@@ -87,7 +87,7 @@ export function HotelComplete() {
       { attempt, pid: search.get("pid"), tid: search.get("tid") },
       attempt ? readPendingHotelAttempt(browserStorage(), attempt) : undefined,
     );
-    if (state.kind === "ready") void confirm(state.pending);
+    if (state.kind === "ready") void submitBooking(state.pending);
     else setView({ kind: state.kind });
   }, []);
 
@@ -114,7 +114,7 @@ export function HotelComplete() {
         </p>
         {referenceLine}
         {pending && (
-          <button type="button" className="button button-blue" onClick={() => void confirm(pending)}>
+          <button type="button" className="button button-blue" onClick={() => void submitBooking(pending)}>
             Check again
           </button>
         )}

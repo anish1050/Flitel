@@ -17,7 +17,7 @@ export type PendingHotelAttempt = {
   holder: GuestInput;
 };
 
-// Guest details live here only between the card form and its redirect; the checking marker drops them.
+// Guest details stay here until the return page gets a confirmed or failed answer and clears the entry.
 const storedAttemptSchema = z.union([
   z.object({
     state: z.literal("ready"),

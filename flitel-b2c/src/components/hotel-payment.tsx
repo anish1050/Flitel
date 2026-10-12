@@ -144,7 +144,6 @@ export function HotelPayment({
   const [gone, setGone] = useState(false);
   const [busy, setBusy] = useState(false);
   const holder = useRef(emptyGuest);
-  const attemptRef = useRef<string>(undefined);
 
   async function requestPrebook(): Promise<Prebook | undefined> {
     const response = await fetch("/api/hotels/prebook", {
@@ -166,11 +165,6 @@ export function HotelPayment({
     return parsed.data.data;
   }
 
-  function dropAttempt() {
-    if (attemptRef.current) clearHotelAttempt(browserStorage(), attemptRef.current);
-    attemptRef.current = undefined;
-  }
-
   // The pending attempt is saved and read back before the card form mounts, so the redirect can never outrun it.
   function startPayment(prebook: Prebook) {
     const storage = browserStorage();
@@ -184,12 +178,12 @@ export function HotelPayment({
       holder: holder.current,
     });
     if (!readPendingHotelAttempt(storage, attemptId)) {
+      clearHotelAttempt(storage, attemptId);
       setBusy(false);
       setProblem(storageBlockedMessage);
       setStep({ name: "guest" });
       return;
     }
-    attemptRef.current = attemptId;
     setBusy(false);
     setStep({ name: "pay", prebook, attemptId });
   }
@@ -207,7 +201,6 @@ export function HotelPayment({
     setErrors({});
     setProblem(undefined);
     setBusy(true);
-    dropAttempt();
     const prebook = await requestPrebook();
     if (!prebook) {
       setBusy(false);
@@ -223,9 +216,9 @@ export function HotelPayment({
     setStep({ name: "terms", prebook, changes });
   }
 
-  // Leaving the card form drops its attempt; the next Continue creates a new prebook and attempt.
+  // A mounted card form's attempt may already be paid, so only the return page clears it.
+  // The next Continue creates a new prebook, attempt id and storage key.
   function backToGuest(message?: string) {
-    dropAttempt();
     holder.current = emptyGuest;
     setBusy(false);
     setProblem(message);
@@ -264,7 +257,11 @@ export function HotelPayment({
           <CardForm
             prebook={step.prebook}
             attemptId={step.attemptId}
-            onLoadFailed={() => backToGuest(cardFormMessage)}
+            onLoadFailed={() => {
+              // The form never loaded, so nothing was charged and the attempt can go.
+              clearHotelAttempt(browserStorage(), step.attemptId);
+              backToGuest(cardFormMessage);
+            }}
           />
           <button type="button" className="link-button" onClick={() => backToGuest()}>
             Edit details

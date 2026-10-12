@@ -21,8 +21,8 @@ declare global {
 const sdkUrl = "https://payment-wrapper.liteapi.travel/dist/liteAPIPayment.js?v=a1";
 const sdkTimeoutMs = 15_000;
 // Once the form is live the customer may have been charged, so this wording never says otherwise.
-const paymentErrorMessage =
-  "Something went wrong with the card form. If you were charged, you will be contacted with your reference — otherwise try again.";
+const paymentErrorMessage = (reference: string) =>
+  `Something went wrong with the card form. If your card was charged, please keep this reference and quote it to Flitel: ${reference}. Otherwise you can try again.`;
 
 let sdkLoading: Promise<void> | undefined;
 
@@ -30,7 +30,10 @@ function loadPaymentSdk(): Promise<void> {
   if (window.LiteAPIPayment) return Promise.resolve();
   sdkLoading ??= new Promise<void>((resolve, reject) => {
     const script = document.createElement("script");
+    let settled = false;
     const fail = () => {
+      if (settled) return;
+      settled = true;
       clearTimeout(timer);
       script.remove();
       sdkLoading = undefined;
@@ -39,6 +42,8 @@ function loadPaymentSdk(): Promise<void> {
     const timer = setTimeout(fail, sdkTimeoutMs);
     script.src = sdkUrl;
     script.onload = () => {
+      if (settled) return;
+      settled = true;
       clearTimeout(timer);
       resolve();
     };
@@ -90,7 +95,7 @@ export function CardForm({
       try {
         await payment.handlePayment();
       } catch {
-        if (!cancelled) setProblem(paymentErrorMessage);
+        if (!cancelled) setProblem(paymentErrorMessage(attemptId.slice(0, 8).toUpperCase()));
       }
     }
     void mount();
