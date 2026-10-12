@@ -2698,6 +2698,8 @@ svg {
   padding: 22px 25px 25px;
 }
 .room-card {
+  display: flex;
+  flex-direction: column;
   border: 1px solid var(--line);
   border-radius: 11px;
   overflow: hidden;
@@ -2712,6 +2714,9 @@ svg {
   background: var(--pale);
 }
 .room-card-body {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
   padding: 15px 16px 16px;
 }
 .room-card-body h3 {
@@ -2734,7 +2739,8 @@ svg {
   justify-content: space-between;
   align-items: flex-end;
   gap: 12px;
-  margin-top: 14px;
+  margin-top: auto;
+  padding-top: 14px;
 }
 .room-card-price strong {
   display: block;

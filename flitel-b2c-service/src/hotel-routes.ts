@@ -36,7 +36,7 @@ import {
 
 const hotelIdPattern = /^[A-Za-z0-9_-]{2,40}$/;
 const searchTtlMs = 60_000;
-const hotelDetailsTtlMs = 10 * 60_000;
+const hotelDetailsTtlMs = 6 * 60 * 60_000;
 const isSuccess = (status: number) => status >= 200 && status < 300;
 
 // Mounted under /api.

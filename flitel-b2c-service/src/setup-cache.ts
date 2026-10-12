@@ -38,14 +38,17 @@ try {
   const existing = new Set(
     (await database.listCollections({}, { nameOnly: true }).toArray()).map(({ name }) => name),
   );
-  for (const name of ["booking_attempts", "email_otps", "profiles"]) {
+  for (const name of ["booking_attempts", "email_otps", "profiles", "hotel_cache"]) {
     if (!existing.has(name)) await database.createCollection(name);
   }
   // Email codes carry their own expiry; this only sweeps finished send windows.
   await database
     .collection("email_otps")
     .createIndex({ expiresAt: 1 }, { expireAfterSeconds: 0, name: "expiresAt_ttl" });
-  console.log("booking_attempts, email_otps (with TTL index) and profiles are ready.");
+  await database
+    .collection("hotel_cache")
+    .createIndex({ expiresAt: 1 }, { expireAfterSeconds: 0, name: "expiresAt_ttl" });
+  console.log("booking_attempts, email_otps, profiles and hotel_cache (both with TTL indexes) are ready.");
 } finally {
   await closeDatabase();
 }
