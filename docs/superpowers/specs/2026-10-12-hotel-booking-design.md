@@ -29,20 +29,22 @@ All under the existing CORS rules; bodies are JSON with the usual `{ "error": { 
 | `POST /api/hotels/:hotelId/rates` | Same stay fields → `{ data: { hotel: { id, name, photo, address, stars, rating, description?, images?, facilities? }, rooms: [{ offerId, name, boardName, refundable, cancelBefore?, price: { amount, currency }, taxesNotIncluded: [{ description, amount, currency }] }] } }`. Rates with `hotelIds: [hotelId]`; hotel details from `GET /data/hotel?hotelId=` with a short timeout, omitted if it fails. |
 | `POST /api/hotels/prebook` | `{ offerId }` → `{ data: { prebookId, transactionId, secretKey, hotelId, checkin, checkout, price: { amount, currency }, priceDifferencePercent, cancellationChanged, boardChanged, refundable } }`. Calls `POST https://book.liteapi.travel/v3.0/rates/prebook` with `usePaymentSdk: true`. |
 | `POST /api/hotel-bookings` | `{ attemptId, prebookId, transactionId, expectedTotal, expectedCurrency, holder: { firstName, lastName, email, phone } }` → `200 { data: { bookingId } }`, `202 { data: { status: "checking" } }`, or an error. The once-only booking described below. |
-| `GET /api/hotel-bookings/:bookingId` | `GET https://book.liteapi.travel/v3.0/bookings/{id}` → `{ data: { bookingId, status, hotel: { id, name }, checkin, checkout, holder: { firstName, lastName, email }, price, currency, cancellation: { refundableTag, cancelPolicyInfos }, hotelConfirmationCode? } }` (no phone). |
+| `GET /api/hotel-bookings/:bookingId?ref=<attemptId>` | `GET https://book.liteapi.travel/v3.0/bookings/{id}`; the booking is returned only when its `clientReference` equals `ref` (the unguessable attempt UUID that created it), otherwise `404 BOOKING_NOT_FOUND`, so a booking id alone never reveals guest details → `{ data: { bookingId, status, hotel: { id, name }, checkin, checkout, holder: { firstName, lastName, email }, price, currency, cancellation: { refundableTag, cancelPolicyInfos }, hotelConfirmationCode? } }` (no phone). |
+
+The prebook response's `prebookId` and `transactionId` must match the booking schema's patterns, otherwise prebook answers `502` before the card form is shown. After payment, no booking answer says "nothing was booked", because the card has already been charged.
 
 Limits: search/rates bodies 4 KB, booking body 8 KB (the existing `/api/flights/*` limit does not cover `/api/hotels/*`).
 
 ### `POST /api/hotel-bookings` steps
 
 1. Validate the body (zod). `attemptId` is a UUID created for each payment attempt.
-2. Look up the attempt in `booking_attempts` (`_id` = `attemptId`); if it exists, replay its result: `confirmed` → bookingId, `failed` → `422 BOOKING_FAILED`, `pending`/`unknown` → `202 checking`. MongoDB unavailable → `503 BOOKINGS_UNAVAILABLE`, nothing booked.
-3. Claim the attempt (`status: pending`, `offerId` field holds the prebookId, amount and currency are the client's expected values and informational only). A duplicate-key race replays as in step 2.
+2. Look up the attempt in `booking_attempts`. The key is `_id` = `hotel:<prebookId>`, not the client's attemptId: one prebook is one payment, so a second tab or a second attemptId for the same prebook replays the first result instead of booking again; if it exists, replay its result: `confirmed` → bookingId, `failed` → `422 BOOKING_FAILED`, `pending`/`unknown` → `202 checking`. MongoDB unavailable → `503 BOOKINGS_UNAVAILABLE`, nothing booked.
+3. Claim the attempt (`status: pending`, `_id` as above, `offerId` field holds the prebookId, amount and currency are the client's expected values and informational only). A duplicate-key race replays as in step 2.
 4. `POST https://book.liteapi.travel/v3.0/rates/book` with `prebookId`, `holder`, one guest (`occupancyNumber: 1`, the holder's name and email), `payment: { method: "TRANSACTION_ID", transactionId }` and `clientReference: attemptId` (LiteAPI treats a repeated clientReference as a duplicate, error 4005, so even a lost record cannot book twice).
 5. Record and answer:
    - `200` with `status: CONFIRMED` and a `bookingId` → `confirmed`.
    - `400` with code 4000, 4002, 4003 or 4010 (the request was invalid, no booking) → `failed`, `422 BOOKING_REJECTED`.
-   - `410` / code 4012, or `400` code 2013 (room no longer available) → `failed`, `410 ROOM_UNAVAILABLE`.
+   - HTTP `410`, or HTTP `400` with code 4012 or 2013 (room no longer available) → `failed`, `410 ROOM_UNAVAILABLE`. Only those exact statuses count: a 2xx or 5xx carrying such a code is `unknown`.
    - `401` or `403` → `failed`, `503 HOTELS_UNAVAILABLE`.
    - Everything else, including timeouts, 5xx, an unreadable body, codes 2014, 4005, 5000 and a `200` that is not `CONFIRMED` → `unknown`, `202 checking`.
 
