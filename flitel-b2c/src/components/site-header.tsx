@@ -60,7 +60,9 @@ export function SiteFooter() {
           ? "Duffel test mode. Fares and schedules may be unrealistic."
           : "An early look at Flitel. All fares and schedules are examples."}
         <br />
-        Test bookings run in test mode for flights and hotels. No real tickets or rooms are booked.
+        {hasFlightBackend()
+          ? "Test bookings run in test mode for flights and hotels. No real tickets or rooms are booked."
+          : "No payments or bookings are available in this preview."}
       </p>
       <a
         className="photo-credits"

@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { ArrowLeft, Info, Star } from "lucide-react";
 import { redirect } from "next/navigation";
 import { FlightLink } from "@/components/flight-transition";
+import { HotelsUnavailable } from "@/components/hotels-unavailable";
 import { hasFlightBackend } from "@/lib/flight-api";
 import { formatCalendarDate, formatPrice } from "@/lib/flights";
 import { fetchHotelRooms } from "@/lib/hotel-api";
@@ -17,10 +18,20 @@ export const metadata: Metadata = { title: "Your hotel" };
 
 const maxImages = 8;
 
-function formatCancelDate(value: string): string | undefined {
+// UTC keeps the day and time independent of the server's timezone.
+function formatCancelTime(value: string): string | undefined {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return undefined;
-  return date.toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric" });
+  const text = date.toLocaleString("en-GB", {
+    day: "numeric",
+    month: "long",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23",
+    timeZone: "UTC",
+  });
+  return `${text} UTC`;
 }
 
 function RoomRow({
@@ -32,7 +43,12 @@ function RoomRow({
   nights: number;
   reserveHref: string;
 }) {
-  const cancelDate = room.cancelBefore ? formatCancelDate(room.cancelBefore) : undefined;
+  const cancelTime = room.cancelBefore ? formatCancelTime(room.cancelBefore) : undefined;
+  const cancellationLabel = !room.refundable
+    ? "Non-refundable"
+    : cancelTime
+      ? `Free cancellation until ${cancelTime}`
+      : "Free cancellation";
   const nightsLabel = `${nights} ${nights === 1 ? "night" : "nights"}`;
   return (
     <li className="room-row">
@@ -40,11 +56,7 @@ function RoomRow({
         <h3>{room.name}</h3>
         {room.boardName && <p>{room.boardName}</p>}
         <p className={room.refundable ? "room-refundable" : undefined}>
-          {room.refundable
-            ? cancelDate
-              ? `Free cancellation until ${cancelDate}`
-              : "Free cancellation"
-            : "Non-refundable"}
+          {cancellationLabel}
         </p>
         {room.taxesNotIncluded.length > 0 && (
           <small>
@@ -77,15 +89,7 @@ export default async function HotelDetails({
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
   if (!hasFlightBackend())
-    return (
-      <main id="main" className="empty-state page-width">
-        <h1>Hotels are not available yet.</h1>
-        <p>Hotel search will appear here once it is connected. Flights are available now.</p>
-        <FlightLink href="/" className="button button-blue">
-          Search flights
-        </FlightLink>
-      </main>
-    );
+    return <HotelsUnavailable />;
 
   let stay: StayInput;
   try {
@@ -102,9 +106,9 @@ export default async function HotelDetails({
     detail = await fetchHotelRooms(hotelId, stay);
   } catch (error) {
     return (
-      <main id="main" className="empty-state page-width" role="alert">
+      <main id="main" className="empty-state page-width">
         <h1>This hotel isn’t available right now.</h1>
-        <p>{error instanceof Error ? error.message : "Please search again."}</p>
+        <p role="alert">{error instanceof Error ? error.message : "Please search again."}</p>
         <FlightLink href={backHref} className="button button-blue">
           Back to results
         </FlightLink>
@@ -139,8 +143,8 @@ export default async function HotelDetails({
       </div>
       {gallery.length > 0 && (
         <div className="hotel-gallery">
-          {gallery.slice(0, maxImages).map((url) => (
-            <img key={url} src={url} alt="" loading="lazy" />
+          {gallery.slice(0, maxImages).map((url, index) => (
+            <img key={`${index}-${url}`} src={url} alt="" loading="lazy" />
           ))}
         </div>
       )}
@@ -154,8 +158,8 @@ export default async function HotelDetails({
         <section className="hotel-section">
           <h2>Facilities</h2>
           <ul className="hotel-facilities">
-            {hotel.facilities.map((facility) => (
-              <li key={facility}>
+            {hotel.facilities.map((facility, index) => (
+              <li key={`${index}-${facility}`}>
                 <Star size={12} aria-hidden="true" /> {facility}
               </li>
             ))}
@@ -164,9 +168,9 @@ export default async function HotelDetails({
       )}
       <section className="itinerary-panel">
         <div className="panel-heading">
-          <span>
+          <h2>
             Rooms for {nights} {nights === 1 ? "night" : "nights"}
-          </span>
+          </h2>
           <span>
             {stay.checkin} to {stay.checkout} · {stay.adults} {stay.adults === 1 ? "adult" : "adults"}
           </span>

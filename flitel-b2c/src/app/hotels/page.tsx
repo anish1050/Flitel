@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { Hotel, Info, Star } from "lucide-react";
 import { HotelSearchForm } from "@/components/hotel-search-form";
+import { HotelsUnavailable } from "@/components/hotels-unavailable";
 import { FlightLink } from "@/components/flight-transition";
 import { hasFlightBackend } from "@/lib/flight-api";
 import { formatCalendarDate, formatPrice } from "@/lib/flights";
@@ -88,15 +89,7 @@ async function Results({ stay }: { stay: StayInput }) {
 
 export default async function HotelsPage({ searchParams }: { searchParams: Promise<Params> }) {
   if (!hasFlightBackend())
-    return (
-      <main id="main" className="empty-state page-width">
-        <h1>Hotels are not available yet.</h1>
-        <p>Hotel search will appear here once it is connected. Flights are available now.</p>
-        <FlightLink href="/" className="button button-blue">
-          Search flights
-        </FlightLink>
-      </main>
-    );
+    return <HotelsUnavailable />;
 
   const params = await searchParams;
   const today = formatCalendarDate(new Date());
