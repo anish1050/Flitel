@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   buildStayQuery,
+  cancellationLabel,
   defaultStay,
   findDestination,
   hotelDestinations,
@@ -81,5 +82,19 @@ describe("default stay", () => {
     const stay = defaultStay(new Date(2026, 9, 12));
     expect(stay).toMatchObject({ checkin: "2026-10-26", checkout: "2026-10-28", destination: "mumbai" });
     expect(parseStayParams({ ...stay, adults: String(stay.adults) }, today)).toEqual(stay);
+  });
+});
+
+describe("cancellationLabel", () => {
+  it("labels the deadline in UTC", () => {
+    expect(cancellationLabel(true, "2026-11-04T14:00:00Z")).toBe(
+      "Free cancellation until 4 November 2026 at 14:00 UTC",
+    );
+  });
+
+  it("handles missing, unreadable and non-refundable terms", () => {
+    expect(cancellationLabel(true, undefined)).toBe("Free cancellation");
+    expect(cancellationLabel(true, "soon")).toBe("Free cancellation");
+    expect(cancellationLabel(false, "2026-11-04T14:00:00Z")).toBe("Non-refundable");
   });
 });

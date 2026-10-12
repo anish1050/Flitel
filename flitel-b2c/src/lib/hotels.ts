@@ -178,3 +178,25 @@ export const hotelBookingSchema = z.object({
   hotelConfirmationCode: z.string().optional(),
 });
 export type HotelBooking = z.infer<typeof hotelBookingSchema>;
+
+// UTC keeps the day and time independent of the server's timezone.
+function formatCancelTime(value: string): string | undefined {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return undefined;
+  const text = date.toLocaleString("en-GB", {
+    day: "numeric",
+    month: "long",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23",
+    timeZone: "UTC",
+  });
+  return `${text} UTC`;
+}
+
+export function cancellationLabel(refundable: boolean, cancelBefore?: string): string {
+  if (!refundable) return "Non-refundable";
+  const time = cancelBefore ? formatCancelTime(cancelBefore) : undefined;
+  return time ? `Free cancellation until ${time}` : "Free cancellation";
+}

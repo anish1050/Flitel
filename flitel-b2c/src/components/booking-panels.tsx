@@ -6,7 +6,7 @@ import type { BookingDetails, TravellerInput } from "@/lib/booking";
 
 const titleLabels: Record<string, string> = { mr: "Mr", ms: "Ms", mrs: "Mrs", miss: "Miss" };
 
-function Field({ label, error, children }: { label: string; error?: string; children: ReactNode }) {
+export function Field({ label, error, children }: { label: string; error?: string; children: ReactNode }) {
   return (
     <label className="booking-field">
       <span className="field-label">{label}</span>

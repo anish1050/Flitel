@@ -8,6 +8,7 @@ import { formatCalendarDate, formatPrice } from "@/lib/flights";
 import { fetchHotelRooms } from "@/lib/hotel-api";
 import {
   buildStayQuery,
+  cancellationLabel,
   nightsBetween,
   parseStayParams,
   type Room,
@@ -18,22 +19,6 @@ export const metadata: Metadata = { title: "Your hotel" };
 
 const maxImages = 8;
 
-// UTC keeps the day and time independent of the server's timezone.
-function formatCancelTime(value: string): string | undefined {
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return undefined;
-  const text = date.toLocaleString("en-GB", {
-    day: "numeric",
-    month: "long",
-    year: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-    hourCycle: "h23",
-    timeZone: "UTC",
-  });
-  return `${text} UTC`;
-}
-
 function RoomRow({
   room,
   nights,
@@ -43,12 +28,6 @@ function RoomRow({
   nights: number;
   reserveHref: string;
 }) {
-  const cancelTime = room.cancelBefore ? formatCancelTime(room.cancelBefore) : undefined;
-  const cancellationLabel = !room.refundable
-    ? "Non-refundable"
-    : cancelTime
-      ? `Free cancellation until ${cancelTime}`
-      : "Free cancellation";
   const nightsLabel = `${nights} ${nights === 1 ? "night" : "nights"}`;
   return (
     <li className="room-row">
@@ -56,7 +35,7 @@ function RoomRow({
         <h3>{room.name}</h3>
         {room.boardName && <p>{room.boardName}</p>}
         <p className={room.refundable ? "room-refundable" : undefined}>
-          {cancellationLabel}
+          {cancellationLabel(room.refundable, room.cancelBefore)}
         </p>
         {room.taxesNotIncluded.length > 0 && (
           <small>
