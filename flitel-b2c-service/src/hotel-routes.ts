@@ -166,7 +166,7 @@ hotelRoutes.post("/hotels/prebook", async (context) => {
     if (code === 4040 || code === 4002) {
       raiseApiError(410, "OFFER_UNAVAILABLE", "This room is no longer available.");
     }
-    const unavailable = result.status === 401 ? 503 : 502;
+    const unavailable = result.status === 401 || result.status === 403 ? 503 : 502;
     raiseApiError(
       unavailable,
       "HOTELS_UNAVAILABLE",
@@ -233,6 +233,8 @@ hotelRoutes.post("/hotel-bookings", async (context) => {
     offerId: booking.prebookId,
     amount: String(booking.expectedTotal),
     currency: booking.expectedCurrency,
+    // Lets an unclear attempt be matched to the supplier booking by hand.
+    clientReference: booking.attemptId,
   }).catch(bookingsUnavailable);
   if (claimedElsewhere) return replayBooking(context, claimedElsewhere);
 

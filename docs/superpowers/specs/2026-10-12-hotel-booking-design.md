@@ -39,7 +39,7 @@ Limits: search/rates bodies 4 KB, booking body 8 KB (the existing `/api/flights/
 
 1. Validate the body (zod). `attemptId` is a UUID created for each payment attempt.
 2. Look up the attempt in `booking_attempts`. The key is `_id` = `hotel:<prebookId>`, not the client's attemptId: one prebook is one payment, so a second tab or a second attemptId for the same prebook replays the first result instead of booking again; if it exists, replay its result: `confirmed` → bookingId, `failed` → `422 BOOKING_FAILED`, `pending`/`unknown` → `202 checking`. MongoDB unavailable → `503 BOOKINGS_UNAVAILABLE`, nothing booked.
-3. Claim the attempt (`status: pending`, `_id` as above, `offerId` field holds the prebookId, amount and currency are the client's expected values and informational only). A duplicate-key race replays as in step 2.
+3. Claim the attempt (`status: pending`, `_id` as above, `offerId` field holds the prebookId, amount and currency are the client's expected values and informational only; `clientReference` stores the attemptId for manual reconciliation, it is not personal data). A duplicate-key race replays as in step 2.
 4. `POST https://book.liteapi.travel/v3.0/rates/book` with `prebookId`, `holder`, one guest (`occupancyNumber: 1`, the holder's name and email), `payment: { method: "TRANSACTION_ID", transactionId }` and `clientReference: attemptId` (LiteAPI treats a repeated clientReference as a duplicate, error 4005, so even a lost record cannot book twice).
 5. Record and answer:
    - `200` with `status: CONFIRMED` and a `bookingId` → `confirmed`.

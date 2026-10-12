@@ -9,10 +9,12 @@ export type BookingAttempt = {
   currency: string;
   status: BookingStatus;
   orderId?: string;
+  clientReference?: string;
   createdAt: Date;
   updatedAt: Date;
 };
-type NewAttempt = Pick<BookingAttempt, "_id" | "offerId" | "amount" | "currency">;
+type NewAttempt = Pick<BookingAttempt, "_id" | "offerId" | "amount" | "currency"> &
+  Partial<Pick<BookingAttempt, "clientReference">>;
 
 function bookingAttempts() {
   return getDatabase().collection<BookingAttempt>("booking_attempts");

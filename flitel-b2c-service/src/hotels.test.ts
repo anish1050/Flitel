@@ -310,6 +310,12 @@ describe("normaliseRooms", () => {
     expect(hotel.description).toBeUndefined();
   });
 
+  it("fails closed on a currency that is not a three-letter code", () => {
+    const body = ratesBody();
+    const bad = JSON.stringify(body).replaceAll('"INR"', '"RUPEE"');
+    expect(() => normaliseRooms(JSON.parse(bad), "lp1")).toThrow();
+  });
+
   it("fails closed when the rates body has the wrong shape", () => {
     expect(() => normaliseRooms({ nope: true }, "lp1")).toThrow();
   });
@@ -440,6 +446,7 @@ describe("normalisePrebook", () => {
       expect(() => normalisePrebook(prebookBody({ [missing]: undefined }))).toThrow();
     }
     expect(() => normalisePrebook(null)).toThrow();
+    expect(() => normalisePrebook(prebookBody({ currency: "RUPEE" }))).toThrow();
     expect(() => normalisePrebook({ data: {} })).toThrow();
   });
 

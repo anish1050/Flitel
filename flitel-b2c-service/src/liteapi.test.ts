@@ -51,6 +51,21 @@ describe("LiteAPI key", () => {
   });
 });
 
+describe("live key refusal", () => {
+  it.each(["prod_abc", "LIVE_abc", "  Prod_abc  "])("refuses %s with a 503", async (key) => {
+    vi.stubEnv("LITEAPI_KEY", key);
+    const error = (await failureOf(requireLiteapiKey)) as { getResponse(): Response };
+    const response = error.getResponse();
+    expect(response.status).toBe(503);
+    expect(await response.json()).toEqual({
+      error: {
+        code: "LITEAPI_LIVE_REFUSED",
+        message: "Hotel booking runs in the sandbox only.",
+      },
+    });
+  });
+});
+
 describe("requestLiteapi", () => {
   it("sends the key to the search host and parses the JSON", async () => {
     fetchMock.mockResolvedValue(Response.json({ data: [] }, { status: 200 }));

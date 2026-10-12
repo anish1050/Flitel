@@ -91,7 +91,8 @@ export type HotelDetail = {
 // Display-only fields fall back to undefined; the fields a price or an offer id depends on stay strict.
 const optionalString = z.string().optional().catch(undefined);
 const optionalNumber = z.number().optional().catch(undefined);
-const money = z.looseObject({ amount: z.number(), currency: z.string() });
+const currencyCode = z.string().regex(/^[A-Z]{3}$/);
+const money = z.looseObject({ amount: z.number(), currency: currencyCode });
 const rateSchema = z.looseObject({
   name: optionalString,
   boardName: optionalString,
@@ -103,7 +104,7 @@ const rateSchema = z.looseObject({
             included: z.boolean().optional(),
             description: optionalString,
             amount: z.number(),
-            currency: z.string(),
+            currency: currencyCode,
           }),
         )
         .nullish(),
@@ -360,7 +361,7 @@ const prebookSchema = z.looseObject({
     checkin: z.string().min(1),
     checkout: z.string().min(1),
     price: z.number(),
-    currency: z.string().min(1),
+    currency: currencyCode,
     priceDifferencePercent: z.number(),
     cancellationChanged: z.boolean(),
     boardChanged: z.boolean(),
@@ -507,7 +508,7 @@ const storedBookingSchema = z.looseObject({
       email: z.string(),
     }),
     price: z.number(),
-    currency: z.string().min(1),
+    currency: currencyCode,
     cancellationPolicies: z
       .looseObject({
         refundableTag: optionalString,
@@ -517,7 +518,7 @@ const storedBookingSchema = z.looseObject({
               cancelTime: optionalString,
               timezone: optionalString,
               amount: optionalNumber,
-              currency: optionalString,
+              currency: currencyCode.optional().catch(undefined),
             }),
           )
           .nullish(),

@@ -493,6 +493,7 @@ describe("POST /api/hotels/prebook", () => {
       [() => Response.json(errorBody(4002), { status: 400 }), 410, "OFFER_UNAVAILABLE"],
       [() => Response.json(errorBody(4016), { status: 408 }), 502, "HOTELS_UNAVAILABLE"],
       [() => Response.json({}, { status: 401 }), 503, "HOTELS_UNAVAILABLE"],
+      [() => Response.json({}, { status: 403 }), 503, "HOTELS_UNAVAILABLE"],
       [() => new Response("boom", { status: 500 }), 502, "HOTELS_UNAVAILABLE"],
       [() => Promise.reject(new DOMException("t", "TimeoutError")), 504, "HOTELS_TIMEOUT"],
       [
@@ -592,6 +593,7 @@ describe("POST /api/hotel-bookings", () => {
       currency: "INR",
       status: "confirmed",
       orderId: "bk_1",
+      clientReference: request.attemptId,
     });
     expect(JSON.stringify([...attempts.values()])).not.toMatch(
       /Priya|Sharma|example\.com|9876543210/,

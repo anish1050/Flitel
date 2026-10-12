@@ -19,6 +19,9 @@ export function requireLiteapiKey(): string {
   if (!key) {
     raiseApiError(503, "LITEAPI_NOT_CONFIGURED", "Hotel booking isn't available yet.");
   }
+  if (/^(prod|live)_/i.test(key)) {
+    raiseApiError(503, "LITEAPI_LIVE_REFUSED", "Hotel booking runs in the sandbox only.");
+  }
   return key;
 }
 
