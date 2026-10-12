@@ -113,7 +113,7 @@ export default async function HotelBookingConfirmation({
             </span>
           )}
           <div className="price-total">
-            <span>Total paid</span>
+            <span>{confirmed ? "Total paid" : "Total"}</span>
             <strong>{total}</strong>
           </div>
           <div className="booking-preview-note">

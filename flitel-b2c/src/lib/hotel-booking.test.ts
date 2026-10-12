@@ -138,8 +138,6 @@ describe("classifying a booking answer", () => {
     "ROOM_UNAVAILABLE",
     "BOOKING_FAILED",
     "HOTELS_UNAVAILABLE",
-    "BOOKINGS_UNAVAILABLE",
-    "LITEAPI_NOT_CONFIGURED",
     "INVALID_BOOKING",
   ])("treats %s as failed with fixed refund wording", (code) => {
     const outcome = classifyHotelBooking(422, error(code));
@@ -151,6 +149,8 @@ describe("classifying a booking answer", () => {
   });
 
   it.each([
+    ["BOOKINGS_UNAVAILABLE, where nothing was claimed", 503, error("BOOKINGS_UNAVAILABLE")],
+    ["LITEAPI_NOT_CONFIGURED, where nothing was claimed", 503, error("LITEAPI_NOT_CONFIGURED")],
     ["a 202 checking answer", 202, { data: { status: "checking" } }],
     ["a 500 with an unknown code", 500, error("SOMETHING_NEW")],
     ["a 502 without a code", 502, { error: {} }],

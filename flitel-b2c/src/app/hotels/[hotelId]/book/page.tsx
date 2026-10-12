@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { ArrowLeft, Info } from "lucide-react";
 import { redirect } from "next/navigation";
+import { HotelRoomGone } from "@/components/hotel-room-gone";
 import { HotelPayment } from "@/components/hotel-payment";
 import { FlightLink } from "@/components/flight-transition";
 import { HotelsUnavailable } from "@/components/hotels-unavailable";
@@ -19,12 +20,8 @@ export const metadata: Metadata = { title: "Guest details and payment" };
 
 function Gone({ hotelHref }: { hotelHref: string }) {
   return (
-    <main id="main" className="empty-state page-width" role="alert">
-      <h1>This room is no longer available.</h1>
-      <p>Choose another room to continue.</p>
-      <FlightLink href={hotelHref} className="button button-blue">
-        Back to the hotel’s rooms
-      </FlightLink>
+    <main id="main" className="empty-state page-width">
+      <HotelRoomGone hotelHref={hotelHref} />
     </main>
   );
 }

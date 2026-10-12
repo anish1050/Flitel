@@ -106,6 +106,7 @@ export type HotelBookingOutcome =
   | { kind: "failed"; code: string; message: string };
 
 // The card is charged before the booking call, so every failed message says what happens to the money.
+// BOOKINGS_UNAVAILABLE and LITEAPI_NOT_CONFIGURED claim nothing server-side, so a re-send can still book.
 const refundNote =
   " If your card was charged, Flitel will arrange any refund. Please keep your booking reference.";
 const failureReasons: Record<string, string> = {
@@ -113,8 +114,6 @@ const failureReasons: Record<string, string> = {
   ROOM_UNAVAILABLE: "This room is no longer available, so your booking was not completed.",
   BOOKING_FAILED: "This booking could not be completed.",
   HOTELS_UNAVAILABLE: "Hotel booking is unavailable right now, so your booking was not completed.",
-  BOOKINGS_UNAVAILABLE: "We couldn't process this booking right now, so it was not completed.",
-  LITEAPI_NOT_CONFIGURED: "Hotel booking isn't available yet, so your booking was not completed.",
   INVALID_BOOKING: "We couldn't use these booking details, so your booking was not completed.",
 };
 

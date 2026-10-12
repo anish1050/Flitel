@@ -1,5 +1,5 @@
 import { formatPrice } from "./flights";
-import type { PendingHotelAttempt } from "./hotel-booking";
+import type { HotelBookingOutcome, PendingHotelAttempt } from "./hotel-booking";
 import type { Prebook } from "./hotels";
 
 export function buildHotelReturnUrl(
@@ -54,4 +54,9 @@ export function resolveReturnState(
     pending.prebookId === params.pid &&
     pending.transactionId === params.tid;
   return matches ? { kind: "ready", pending } : { kind: "missing" };
+}
+
+/** Only a proven answer ends the attempt; anything else keeps the details so a re-send can finish it. */
+export function shouldKeepAttempt(outcome: HotelBookingOutcome): boolean {
+  return outcome.kind === "checking";
 }

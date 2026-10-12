@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 import type { PendingHotelAttempt } from "./hotel-booking";
-import { buildHotelReturnUrl, describePrebookChanges, resolveReturnState } from "./hotel-checkout";
+import {
+  buildHotelReturnUrl,
+  describePrebookChanges,
+  resolveReturnState,
+  shouldKeepAttempt,
+} from "./hotel-checkout";
 import type { Prebook } from "./hotels";
 
 const prebook: Prebook = {
@@ -93,5 +98,13 @@ describe("resolveReturnState", () => {
 
   it("keeps the checking marker", () => {
     expect(resolveReturnState(params, { state: "checking" })).toEqual({ kind: "checking" });
+  });
+});
+
+describe("shouldKeepAttempt", () => {
+  it("keeps the paid attempt until the answer is proven", () => {
+    expect(shouldKeepAttempt({ kind: "checking" })).toBe(true);
+    expect(shouldKeepAttempt({ kind: "confirmed", bookingId: "bk_1" })).toBe(false);
+    expect(shouldKeepAttempt({ kind: "failed", code: "ROOM_UNAVAILABLE", message: "x" })).toBe(false);
   });
 });

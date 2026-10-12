@@ -1,113 +1,36 @@
 "use client";
 
 import { Info, UserRound } from "lucide-react";
-import Link from "next/link";
-import { useEffect, useRef, useState } from "react";
+import { useRef, useState } from "react";
 import { z } from "zod";
 import { Field } from "@/components/booking-panels";
+import { CardForm } from "@/components/hotel-card-form";
+import { HotelRoomGone } from "@/components/hotel-room-gone";
 import { browserStorage, fieldErrors } from "@/lib/booking";
 import { formatPrice } from "@/lib/flights";
 import {
   clearHotelAttempt,
   guestSchema,
+  readPendingHotelAttempt,
   savePendingHotelAttempt,
   type GuestInput,
 } from "@/lib/hotel-booking";
-import { buildHotelReturnUrl, describePrebookChanges } from "@/lib/hotel-checkout";
+import { describePrebookChanges } from "@/lib/hotel-checkout";
 import { prebookSchema, type Prebook } from "@/lib/hotels";
 
-declare global {
-  interface Window {
-    LiteAPIPayment?: new (options: {
-      publicKey: string;
-      secretKey: string;
-      returnUrl: string;
-      targetElement: string;
-      appearance: { theme: string };
-      options: { business: { name: string } };
-    }) => { handlePayment: () => unknown };
-  }
-}
-
-const sdkUrl = "https://payment-wrapper.liteapi.travel/dist/liteAPIPayment.js?v=a1";
 const retryMessage =
   "We couldn’t reserve this room right now. You have not been charged. Please try again.";
 const cardFormMessage =
   "The card form couldn’t load. You have not been charged. Please try again.";
+const storageBlockedMessage =
+  "We can’t take payment in this browser (storage is blocked). Please use another browser.";
 const prebookAnswerSchema = z.object({ data: prebookSchema });
 const emptyGuest: GuestInput = { firstName: "", lastName: "", email: "", phone: "" };
-
-let sdkLoading: Promise<void> | undefined;
-
-function loadPaymentSdk(): Promise<void> {
-  if (window.LiteAPIPayment) return Promise.resolve();
-  sdkLoading ??= new Promise<void>((resolve, reject) => {
-    const script = document.createElement("script");
-    script.src = sdkUrl;
-    script.onload = () => resolve();
-    script.onerror = () => {
-      script.remove();
-      sdkLoading = undefined;
-      reject(new Error(cardFormMessage));
-    };
-    document.head.appendChild(script);
-  });
-  return sdkLoading;
-}
 
 type Step =
   | { name: "guest" }
   | { name: "terms"; prebook: Prebook; changes: string[] }
   | { name: "pay"; prebook: Prebook; attemptId: string };
-
-function CardForm({
-  prebook,
-  attemptId,
-  onFailed,
-}: {
-  prebook: Prebook;
-  attemptId: string;
-  onFailed: () => void;
-}) {
-  // Strict Mode runs effects twice; the card form must mount once per attempt.
-  const mountedFor = useRef<string>(undefined);
-  useEffect(() => {
-    if (mountedFor.current === attemptId) return;
-    mountedFor.current = attemptId;
-    loadPaymentSdk()
-      .then(() => {
-        const payment = new window.LiteAPIPayment!({
-          publicKey: "sandbox",
-          secretKey: prebook.secretKey,
-          returnUrl: buildHotelReturnUrl(window.location.origin, {
-            attemptId,
-            prebookId: prebook.prebookId,
-            transactionId: prebook.transactionId,
-          }),
-          targetElement: "#hotel-payment",
-          appearance: { theme: "flat" },
-          options: { business: { name: "Flitel" } },
-        });
-        return payment.handlePayment();
-      })
-      .catch(onFailed);
-  }, [attemptId, prebook, onFailed]);
-
-  return (
-    <section className="itinerary-panel booking-panel">
-      <div className="panel-heading">
-        <span>Pay by card</span>
-        <span>Total {formatPrice(prebook.price.amount, prebook.price.currency)}</span>
-      </div>
-      <div className="itinerary-body">
-        <p className="price-notice">
-          Test mode: use card 4242 4242 4242 4242, any CVV, any future expiry.
-        </p>
-        <div id="hotel-payment" />
-      </div>
-    </section>
-  );
-}
 
 function GuestForm({
   guest,
@@ -170,11 +93,13 @@ function GuestForm({
 function TermsNotice({
   prebook,
   changes,
+  busy,
   onAccept,
   onEdit,
 }: {
   prebook: Prebook;
   changes: string[];
+  busy: boolean;
   onAccept: () => void;
   onEdit: () => void;
 }) {
@@ -192,7 +117,7 @@ function TermsNotice({
           ))}
           <li>New total: {formatPrice(prebook.price.amount, prebook.price.currency)}</li>
         </ul>
-        <button type="button" className="button button-blue" onClick={onAccept}>
+        <button type="button" className="button button-blue" disabled={busy} onClick={onAccept}>
           Accept and continue
         </button>
         <button type="button" className="link-button" onClick={onEdit}>
@@ -219,6 +144,7 @@ export function HotelPayment({
   const [gone, setGone] = useState(false);
   const [busy, setBusy] = useState(false);
   const holder = useRef(emptyGuest);
+  const attemptRef = useRef<string>(undefined);
 
   async function requestPrebook(): Promise<Prebook | undefined> {
     const response = await fetch("/api/hotels/prebook", {
@@ -240,10 +166,16 @@ export function HotelPayment({
     return parsed.data.data;
   }
 
-  // The pending attempt is saved before the card form mounts, so the redirect can never outrun it.
+  function dropAttempt() {
+    if (attemptRef.current) clearHotelAttempt(browserStorage(), attemptRef.current);
+    attemptRef.current = undefined;
+  }
+
+  // The pending attempt is saved and read back before the card form mounts, so the redirect can never outrun it.
   function startPayment(prebook: Prebook) {
+    const storage = browserStorage();
     const attemptId = crypto.randomUUID();
-    savePendingHotelAttempt(browserStorage(), {
+    savePendingHotelAttempt(storage, {
       attemptId,
       prebookId: prebook.prebookId,
       transactionId: prebook.transactionId,
@@ -251,10 +183,19 @@ export function HotelPayment({
       expectedCurrency: prebook.price.currency,
       holder: holder.current,
     });
+    if (!readPendingHotelAttempt(storage, attemptId)) {
+      setBusy(false);
+      setProblem(storageBlockedMessage);
+      setStep({ name: "guest" });
+      return;
+    }
+    attemptRef.current = attemptId;
+    setBusy(false);
     setStep({ name: "pay", prebook, attemptId });
   }
 
   async function continueToPayment() {
+    if (busy) return;
     const parsed = guestSchema.safeParse(guest);
     if (!parsed.success) {
       setErrors(fieldErrors(parsed.error));
@@ -266,36 +207,32 @@ export function HotelPayment({
     setErrors({});
     setProblem(undefined);
     setBusy(true);
+    dropAttempt();
     const prebook = await requestPrebook();
-    setBusy(false);
-    if (!prebook) return;
+    if (!prebook) {
+      setBusy(false);
+      return;
+    }
     holder.current = parsed.data;
     const changes = describePrebookChanges(prebook, summaryPrice);
-    if (changes.length > 0) setStep({ name: "terms", prebook, changes });
-    else startPayment(prebook);
+    if (changes.length === 0) {
+      startPayment(prebook);
+      return;
+    }
+    setBusy(false);
+    setStep({ name: "terms", prebook, changes });
   }
 
   // Leaving the card form drops its attempt; the next Continue creates a new prebook and attempt.
   function backToGuest(message?: string) {
-    if (step.name === "pay") clearHotelAttempt(browserStorage(), step.attemptId);
+    dropAttempt();
     holder.current = emptyGuest;
+    setBusy(false);
     setProblem(message);
     setStep({ name: "guest" });
   }
 
-  if (gone) {
-    return (
-      <section className="itinerary-panel booking-panel" role="alert">
-        <div className="itinerary-body">
-          <h2>This room is no longer available.</h2>
-          <p>Choose another room to continue.</p>
-          <Link href={hotelHref} className="button button-blue">
-            Back to the hotel’s rooms
-          </Link>
-        </div>
-      </section>
-    );
-  }
+  if (gone) return <HotelRoomGone hotelHref={hotelHref} />;
 
   return (
     <div>
@@ -313,7 +250,12 @@ export function HotelPayment({
         <TermsNotice
           prebook={step.prebook}
           changes={step.changes}
-          onAccept={() => startPayment(step.prebook)}
+          busy={busy}
+          onAccept={() => {
+            if (busy) return;
+            setBusy(true);
+            startPayment(step.prebook);
+          }}
           onEdit={() => backToGuest()}
         />
       )}
@@ -322,7 +264,7 @@ export function HotelPayment({
           <CardForm
             prebook={step.prebook}
             attemptId={step.attemptId}
-            onFailed={() => backToGuest(cardFormMessage)}
+            onLoadFailed={() => backToGuest(cardFormMessage)}
           />
           <button type="button" className="link-button" onClick={() => backToGuest()}>
             Edit details
