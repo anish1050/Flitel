@@ -1,4 +1,4 @@
-import { Globe2, Plane, Sparkles } from "lucide-react";
+import { Compass, Globe2, Sparkles } from "lucide-react";
 import { FlightLink } from "./flight-transition";
 import { hasFlightBackend } from "@/lib/flight-api";
 
@@ -7,7 +7,7 @@ export function SiteHeader() {
     <header className="site-header">
       <div className="header-inner">
         <FlightLink className="brand" href="/" aria-label="Flitel home">
-          <Plane size={29} strokeWidth={2.5} />
+          <Compass size={29} strokeWidth={2.5} />
           <span>
             flitel<span className="brand-dot">.</span>
           </span>
@@ -50,7 +50,7 @@ export function SiteFooter() {
     <footer className="site-footer">
       <div>
         <FlightLink className="brand" href="/">
-          <Plane size={24} />
+          <Compass size={24} />
           <span>flitel.</span>
         </FlightLink>
         <p>A little closer to somewhere new.</p>

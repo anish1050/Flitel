@@ -134,7 +134,6 @@ svg {
   color: #183b8d;
 }
 .brand > svg {
-  transform: rotate(-14deg);
   color: var(--blue);
 }
 .brand-dot {
