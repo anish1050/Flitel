@@ -20,7 +20,8 @@ export default function RootLayout({
 }) {
   return (
     <html lang="en" data-scroll-behavior="smooth">
-      <body>
+      {/* Browser extensions add attributes to <body> before React loads; this silences only that mismatch. */}
+      <body suppressHydrationWarning>
         <FlightTransition>
           <a className="skip-link" href="#main">
             Skip to content
