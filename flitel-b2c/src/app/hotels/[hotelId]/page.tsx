@@ -3,6 +3,7 @@ import { ArrowLeft, Info, Star } from "lucide-react";
 import { redirect } from "next/navigation";
 import { FlightLink } from "@/components/flight-transition";
 import { HotelsUnavailable } from "@/components/hotels-unavailable";
+import { StayEditor } from "@/components/stay-editor";
 import { hasFlightBackend } from "@/lib/flight-api";
 import { formatCalendarDate, formatPrice } from "@/lib/flights";
 import { fetchHotelRooms } from "@/lib/hotel-api";
@@ -203,6 +204,11 @@ export default async function HotelDetails({
             {stay.checkin} to {stay.checkout} · {stay.adults} {stay.adults === 1 ? "adult" : "adults"}
           </span>
         </div>
+        <StayEditor
+          action={`/hotels/${encodeURIComponent(hotelId)}`}
+          stay={stay}
+          today={formatCalendarDate(new Date())}
+        />
         {rooms.length === 0 ? (
           <div className="empty-state">
             <h2>No rooms are available for these dates</h2>
