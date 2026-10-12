@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { resetRateLimits } from "./rate-limit.js";
 import app from "./index.js";
 
 vi.mock("./mongodb.js", () => ({
@@ -58,6 +59,7 @@ const refresh = (id = "off_original", body: unknown = search) =>
   });
 
 beforeEach(() => {
+  resetRateLimits();
   vi.useFakeTimers({ toFake: ["Date"] });
   vi.setSystemTime(new Date("2026-10-09T12:00:00Z"));
   vi.stubEnv("DUFFEL_ACCESS_TOKEN", "duffel_test_example");

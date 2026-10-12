@@ -1,5 +1,6 @@
 import "server-only";
 import { z } from "zod";
+import { backendHeaders } from "./backend-headers";
 import { hasFlightBackend } from "./flight-api";
 import {
   findDestination,
@@ -47,6 +48,7 @@ async function requestHotels(
     response = await fetch(`${backendUrl()}${path}`, {
       method: body === undefined ? "GET" : "POST",
       headers: {
+        ...(await backendHeaders()),
         Accept: "application/json",
         ...(body === undefined ? {} : { "Content-Type": "application/json" }),
       },
@@ -127,7 +129,7 @@ export async function prebookRoom(offerId: string): Promise<BackendAnswer> {
   try {
     const response = await fetch(`${backendUrl()}/api/hotels/prebook`, {
       method: "POST",
-      headers: { Accept: "application/json", "Content-Type": "application/json" },
+      headers: { ...(await backendHeaders()), Accept: "application/json", "Content-Type": "application/json" },
       body: JSON.stringify({ offerId }),
       cache: "no-store",
       signal: AbortSignal.timeout(35_000),
@@ -147,7 +149,7 @@ export async function createHotelBooking(input: unknown): Promise<BackendAnswer>
   try {
     const response = await fetch(`${backendUrl()}/api/hotel-bookings`, {
       method: "POST",
-      headers: { Accept: "application/json", "Content-Type": "application/json" },
+      headers: { ...(await backendHeaders()), Accept: "application/json", "Content-Type": "application/json" },
       body: JSON.stringify(input),
       cache: "no-store",
       signal: AbortSignal.timeout(85_000),

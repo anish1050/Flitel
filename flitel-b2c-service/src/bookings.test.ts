@@ -1,4 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { resetRateLimits } from "./rate-limit.js";
+import { sessionHeader } from "./test-support.js";
 import app from "./index.js";
 
 const { attempts, mongo } = vi.hoisted(() => ({
@@ -104,12 +106,13 @@ const orderCalls = () =>
 function placeBooking(body: unknown) {
   return app.request("/api/bookings", {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", ...sessionHeader() },
     body: JSON.stringify(body),
   });
 }
 
 beforeEach(() => {
+  resetRateLimits();
   attempts.clear();
   mongo.down = false;
   mongo.throwsOnConnect = false;

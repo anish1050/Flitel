@@ -1,4 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { resetRateLimits } from "./rate-limit.js";
+import { sessionHeader } from "./test-support.js";
 import app from "./index.js";
 
 const { attempts, mongo } = vi.hoisted(() => ({
@@ -99,9 +101,11 @@ const detailsResponse = {
 };
 
 function post(path: string, body: unknown, raw = false) {
+  // Loops over many cases would trip the per-address limit; the limit has its own test.
+  resetRateLimits();
   return app.request(path, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", ...sessionHeader() },
     body: raw ? String(body) : JSON.stringify(body),
   });
 }
@@ -109,6 +113,7 @@ const callTo = (fragment: string) =>
   fetchMock.mock.calls.filter(([url]) => String(url).includes(fragment));
 
 beforeEach(() => {
+  resetRateLimits();
   attempts.clear();
   mongo.down = false;
   mongo.throwsOnConnect = false;

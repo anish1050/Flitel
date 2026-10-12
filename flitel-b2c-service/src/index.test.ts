@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { resetRateLimits } from "./rate-limit.js";
 import app from "./index.js";
 
 const { pingMongo, findCachedSearch, saveCachedSearch } = vi.hoisted(() => ({
@@ -59,6 +60,7 @@ function searchFlights(body: unknown = search, stream = false) {
 }
 
 beforeEach(() => {
+  resetRateLimits();
   cachedSearches.clear();
   findCachedSearch.mockReset().mockImplementation(async (filter) => {
     const cached = cachedSearches.get(filter._id);

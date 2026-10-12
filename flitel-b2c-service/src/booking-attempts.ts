@@ -10,11 +10,13 @@ export type BookingAttempt = {
   status: BookingStatus;
   orderId?: string;
   clientReference?: string;
+  // Hash of the verified email that placed it, so an unclear attempt can be traced to its owner.
+  ownerHash?: string;
   createdAt: Date;
   updatedAt: Date;
 };
 type NewAttempt = Pick<BookingAttempt, "_id" | "offerId" | "amount" | "currency"> &
-  Partial<Pick<BookingAttempt, "clientReference">>;
+  Partial<Pick<BookingAttempt, "clientReference" | "ownerHash">>;
 
 function bookingAttempts() {
   return getDatabase().collection<BookingAttempt>("booking_attempts");

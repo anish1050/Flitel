@@ -1,7 +1,7 @@
 "use client";
 
 import { Info, UserRound } from "lucide-react";
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { z } from "zod";
 import { Field } from "@/components/booking-panels";
 import { CardForm } from "@/components/hotel-card-form";
@@ -15,6 +15,7 @@ import {
   savePendingHotelAttempt,
   type GuestInput,
 } from "@/lib/hotel-booking";
+import { EmailVerification, saveProfile, useSession } from "@/components/verify-email";
 import { describePrebookChanges } from "@/lib/hotel-checkout";
 import { prebookSchema, type Prebook } from "@/lib/hotels";
 
@@ -37,6 +38,8 @@ function GuestForm({
   errors,
   problem,
   busy,
+  emailVerified,
+  needsVerification,
   onChange,
   onSubmit,
 }: {
@@ -44,6 +47,8 @@ function GuestForm({
   errors: Record<string, string>;
   problem?: string;
   busy: boolean;
+  emailVerified: boolean;
+  needsVerification: boolean;
   onChange: (changes: Partial<GuestInput>) => void;
   onSubmit: () => void;
 }) {
@@ -71,7 +76,7 @@ function GuestForm({
             <input value={guest.lastName} autoComplete="family-name" aria-invalid={Boolean(errors.lastName)} onChange={(event) => onChange({ lastName: event.target.value })} />
           </Field>
           <Field label="Email" error={errors.email}>
-            <input type="email" value={guest.email} autoComplete="email" aria-invalid={Boolean(errors.email)} onChange={(event) => onChange({ email: event.target.value })} />
+            <input type="email" value={guest.email} readOnly={emailVerified} autoComplete="email" aria-invalid={Boolean(errors.email)} onChange={(event) => onChange({ email: event.target.value })} />
           </Field>
           <Field label="Phone with country code" error={errors.phone}>
             <input type="tel" value={guest.phone} autoComplete="tel" placeholder="+919876543210" aria-invalid={Boolean(errors.phone)} onChange={(event) => onChange({ phone: event.target.value })} />
@@ -83,9 +88,10 @@ function GuestForm({
           {problem}
         </p>
       )}
-      <button type="submit" className="button button-blue" disabled={busy}>
+      <button type="submit" className="button button-blue" disabled={busy || needsVerification}>
         {busy ? "Reserving the room…" : "Continue to payment"}
       </button>
+      {needsVerification && <p className="field-hint">Verify your email below to continue.</p>}
     </form>
   );
 }
@@ -143,7 +149,20 @@ export function HotelPayment({
   const [problem, setProblem] = useState<string>();
   const [gone, setGone] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [session, setSession] = useSession();
+  const [saveDetails, setSaveDetails] = useState(false);
   const holder = useRef(emptyGuest);
+
+  // Once the email is verified it is the booking email, and a saved profile fills the rest.
+  useEffect(() => {
+    if (!session) return;
+    setGuest((current) => ({
+      email: session.email,
+      firstName: current.firstName || session.profile?.firstName || "",
+      lastName: current.lastName || session.profile?.lastName || "",
+      phone: current.phone || session.profile?.phone || "",
+    }));
+  }, [session]);
 
   async function requestPrebook(): Promise<Prebook | undefined> {
     const response = await fetch("/api/hotels/prebook", {
@@ -155,6 +174,12 @@ export function HotelPayment({
     const body: unknown = await response?.json().catch(() => null);
     if (response?.status === 404 || response?.status === 410) {
       setGone(true);
+      return undefined;
+    }
+    if (response?.status === 401) {
+      // Turned away at the gate, so nothing was reserved or charged.
+      setSession(null);
+      setProblem("Your email verification has expired. Please verify again. You have not been charged.");
       return undefined;
     }
     const parsed = prebookAnswerSchema.safeParse(body);
@@ -201,6 +226,12 @@ export function HotelPayment({
     setErrors({});
     setProblem(undefined);
     setBusy(true);
+    if (saveDetails)
+      void saveProfile({
+        firstName: parsed.data.firstName,
+        lastName: parsed.data.lastName,
+        phone: parsed.data.phone,
+      });
     const prebook = await requestPrebook();
     if (!prebook) {
       setBusy(false);
@@ -235,8 +266,18 @@ export function HotelPayment({
           errors={errors}
           problem={problem}
           busy={busy}
+          emailVerified={Boolean(session)}
+          needsVerification={!session}
           onChange={(changes) => setGuest((current) => ({ ...current, ...changes }))}
           onSubmit={() => void continueToPayment()}
+        />
+      )}
+      {step.name === "guest" && (
+        <EmailVerification
+          session={session}
+          onSession={setSession}
+          saveDetails={saveDetails}
+          onSaveDetailsChange={setSaveDetails}
         />
       )}
       {step.name === "terms" && (

@@ -7,6 +7,8 @@ import {
   recordBookingOutcome,
 } from "./booking-attempts.js";
 import type { BookingAttempt } from "./booking-attempts.js";
+import { rateLimit } from "./rate-limit.js";
+import { hashEmail, requireSession } from "./session.js";
 import { raiseApiError } from "./duffel.js";
 import {
   attemptReferencePattern,
@@ -36,6 +38,10 @@ const isSuccess = (status: number) => status >= 200 && status < 300;
 
 // Mounted under /api.
 export const hotelRoutes = new Hono();
+
+hotelRoutes.use("/hotels/*", rateLimit("hotels", 60, 60_000));
+hotelRoutes.use("/hotels/prebook", rateLimit("prebook", 10, 10 * 60_000));
+hotelRoutes.use("/hotel-bookings", rateLimit("hotel-booking", 10, 10 * 60_000));
 
 hotelRoutes.use(
   "/hotels/*",
@@ -180,6 +186,7 @@ hotelRoutes.post("/hotels/:hotelId/rates", async (context) => {
 });
 
 hotelRoutes.post("/hotels/prebook", async (context) => {
+  requireSession(context);
   const parsed = prebookRequestSchema.safeParse(await readJson(context.req.raw));
   if (!parsed.success) raiseApiError(400, "INVALID_OFFER_ID", "Choose a valid room.");
   requireLiteapiKey();
@@ -250,6 +257,7 @@ function bookingsUnavailable(): never {
 }
 
 hotelRoutes.post("/hotel-bookings", async (context) => {
+  const owner = hashEmail(requireSession(context));
   const parsed = hotelBookingRequestSchema.safeParse(await readJson(context.req.raw));
   if (!parsed.success) {
     raiseApiError(
@@ -272,6 +280,7 @@ hotelRoutes.post("/hotel-bookings", async (context) => {
     currency: booking.expectedCurrency,
     // Lets an unclear attempt be matched to the supplier booking by hand.
     clientReference: booking.attemptId,
+    ownerHash: owner,
   }).catch(bookingsUnavailable);
   if (claimedElsewhere) return replayBooking(context, claimedElsewhere);
 
