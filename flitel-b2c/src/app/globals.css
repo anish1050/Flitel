@@ -3023,3 +3023,38 @@ svg {
     flex: 1 1 100%;
   }
 }
+
+/* Placeholders: plain pale blocks, no motion. */
+.hotel-card-skeleton {
+  display: grid;
+  gap: 12px;
+  padding-bottom: 18px;
+}
+.skeleton-photo {
+  display: block;
+  aspect-ratio: 3 / 2;
+  background: var(--pale);
+}
+.skeleton-line {
+  display: block;
+  height: 14px;
+  margin: 0 16px;
+  border-radius: 6px;
+  background: var(--pale);
+}
+.skeleton-line.short {
+  width: 45%;
+}
+.hotel-skeleton-hero {
+  height: 340px;
+  border-radius: 14px;
+  background: var(--pale);
+}
+.hotel-skeleton-rooms {
+  display: grid;
+  gap: 14px;
+  margin-top: 28px;
+}
+.hotel-skeleton-rooms > .skeleton-line {
+  margin: 0;
+}

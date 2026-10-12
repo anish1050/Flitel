@@ -8,6 +8,7 @@ import {
 } from "./booking-attempts.js";
 import type { BookingAttempt } from "./booking-attempts.js";
 import { rateLimit } from "./rate-limit.js";
+import { cached } from "./response-cache.js";
 import { hashEmail, requireSession } from "./session.js";
 import { raiseApiError } from "./duffel.js";
 import {
@@ -34,6 +35,8 @@ import {
 } from "./liteapi.js";
 
 const hotelIdPattern = /^[A-Za-z0-9_-]{2,40}$/;
+const searchTtlMs = 60_000;
+const hotelDetailsTtlMs = 10 * 60_000;
 const isSuccess = (status: number) => status >= 200 && status < 300;
 
 // Mounted under /api.
@@ -99,20 +102,27 @@ hotelRoutes.post("/hotels/search", async (context) => {
     parsed.data;
   requireLiteapiKey();
 
-  const response = await requestRates({
-    countryCode,
-    cityName,
-    occupancies: [{ adults }],
-    currency,
-    guestNationality,
-    checkin,
-    checkout,
-    timeout: 6,
-    includeHotelData: true,
-    maxRatesPerHotel: 1,
-    limit: 40,
-  });
-  return context.json({ data: { hotels: summariseHotels(response) } });
+  const hotels = await cached(
+    `search:${countryCode}:${cityName}:${checkin}:${checkout}:${adults}:${currency}:${guestNationality}`,
+    searchTtlMs,
+    async () =>
+      summariseHotels(
+        await requestRates({
+          countryCode,
+          cityName,
+          occupancies: [{ adults }],
+          currency,
+          guestNationality,
+          checkin,
+          checkout,
+          timeout: 6,
+          includeHotelData: true,
+          maxRatesPerHotel: 1,
+          limit: 40,
+        }),
+      ),
+  );
+  return context.json({ data: { hotels } });
 });
 
 function validHotelId(context: Context): string {
@@ -123,10 +133,7 @@ function validHotelId(context: Context): string {
   return hotelId;
 }
 
-hotelRoutes.get("/hotels/:hotelId", async (context) => {
-  const hotelId = validHotelId(context);
-  requireLiteapiKey();
-
+async function loadHotelDetails(hotelId: string) {
   let result;
   try {
     result = await requestLiteapi(
@@ -151,7 +158,14 @@ hotelRoutes.get("/hotels/:hotelId", async (context) => {
     );
   }
   assertSandbox(result.body);
-  return context.json({ data: { hotel: normaliseHotelDetails(result.body, hotelId) } });
+  return normaliseHotelDetails(result.body, hotelId);
+}
+
+hotelRoutes.get("/hotels/:hotelId", async (context) => {
+  const hotelId = validHotelId(context);
+  requireLiteapiKey();
+  const hotel = await cached(`hotel:${hotelId}`, hotelDetailsTtlMs, () => loadHotelDetails(hotelId));
+  return context.json({ data: { hotel } });
 });
 
 hotelRoutes.post("/hotels/:hotelId/rates", async (context) => {
@@ -161,28 +175,33 @@ hotelRoutes.post("/hotels/:hotelId/rates", async (context) => {
   const { checkin, checkout, adults, currency, guestNationality } = parsed.data;
   requireLiteapiKey();
 
-  // The details only enrich the page, so a failure there is never an error.
-  const details = requestLiteapi(
-    "api",
-    `/data/hotel?hotelId=${encodeURIComponent(hotelId)}`,
-    { timeoutMs: 4_000 },
-  ).then(
-    (result) => (isSuccess(result.status) ? result.body : undefined),
-    () => undefined,
+  const rooms = await cached(
+    `rates:${hotelId}:${checkin}:${checkout}:${adults}:${currency}:${guestNationality}`,
+    searchTtlMs,
+    async () => {
+      // The details only enrich the page, so a failure there is never an error.
+      const details = requestLiteapi(
+        "api",
+        `/data/hotel?hotelId=${encodeURIComponent(hotelId)}`,
+        { timeoutMs: 4_000 },
+      ).then(
+        (result) => (isSuccess(result.status) ? result.body : undefined),
+        () => undefined,
+      );
+      const response = await requestRates({
+        hotelIds: [hotelId],
+        occupancies: [{ adults }],
+        currency,
+        guestNationality,
+        checkin,
+        checkout,
+        timeout: 6,
+        includeHotelData: true,
+      });
+      return normaliseRooms(response, hotelId, await details);
+    },
   );
-  const response = await requestRates({
-    hotelIds: [hotelId],
-    occupancies: [{ adults }],
-    currency,
-    guestNationality,
-    checkin,
-    checkout,
-    timeout: 6,
-    includeHotelData: true,
-  });
-  return context.json({
-    data: normaliseRooms(response, hotelId, await details),
-  });
+  return context.json({ data: rooms });
 });
 
 hotelRoutes.post("/hotels/prebook", async (context) => {

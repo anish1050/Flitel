@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { resetRateLimits } from "./rate-limit.js";
+import { resetResponseCache } from "./response-cache.js";
 import { sessionHeader } from "./test-support.js";
 import app from "./index.js";
 
@@ -114,6 +115,7 @@ const callTo = (fragment: string) =>
 
 beforeEach(() => {
   resetRateLimits();
+  resetResponseCache();
   attempts.clear();
   mongo.down = false;
   mongo.throwsOnConnect = false;
@@ -169,6 +171,33 @@ describe("POST /api/hotels/search", () => {
       maxRatesPerHotel: 1,
       limit: 40,
     });
+  });
+
+  it("answers a repeated search from memory but still counts it against the visitor", async () => {
+    fetchMock.mockResolvedValue(Response.json(ratesResponse()));
+    // post() resets the limiter on purpose, so this test talks to the app directly.
+    const search = (ip: string) =>
+      app.request("/api/hotels/search", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-Client-IP": ip },
+        body: JSON.stringify(stay),
+      });
+
+    for (let request = 0; request < 60; request += 1) {
+      expect((await search("9.9.9.9")).status).toBe(200);
+    }
+    expect(callTo("/hotels/rates")).toHaveLength(1);
+
+    expect((await search("9.9.9.9")).status).toBe(429);
+    expect((await search("8.8.8.8")).status).toBe(200);
+  });
+
+  it("does not keep a failed search", async () => {
+    fetchMock.mockResolvedValueOnce(new Response("down", { status: 500 }));
+    expect((await post("/api/hotels/search", stay)).status).toBe(502);
+
+    fetchMock.mockResolvedValue(Response.json(ratesResponse()));
+    expect((await post("/api/hotels/search", stay)).status).toBe(200);
   });
 
   it("is 503 without a key and calls nothing", async () => {

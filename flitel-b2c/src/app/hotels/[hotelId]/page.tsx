@@ -3,6 +3,7 @@ import { ArrowLeft, Info, Star } from "lucide-react";
 import { redirect } from "next/navigation";
 import { FlightLink } from "@/components/flight-transition";
 import { HotelsUnavailable } from "@/components/hotels-unavailable";
+import { RemotePhoto } from "@/components/remote-photo";
 import { StayEditor } from "@/components/stay-editor";
 import { hasFlightBackend } from "@/lib/flight-api";
 import { formatCalendarDate, formatPrice } from "@/lib/flights";
@@ -27,7 +28,7 @@ const facilityCardCount = 3;
 function HotelHero({ hotel, photo }: { hotel: HotelDetail; photo?: string }) {
   return (
     <header className={photo ? "hotel-hero" : "hotel-hero hotel-hero-plain"}>
-      {photo && <img src={photo} alt="" />}
+      {photo && <RemotePhoto src={photo} sizes="(max-width: 1200px) 100vw, 1200px" eager />}
       <div className="hotel-hero-shade" />
       <div className="hotel-hero-badges">
         {hotel.stars !== undefined && (
@@ -66,7 +67,7 @@ function HotelFacilities({ hotel, photos }: { hotel: HotelDetail; photos: string
           {featured.map((facility, index) => (
             <li key={`${index}-${facility}`}>
               {photos[index] ? (
-                <img src={photos[index]} alt="" loading="lazy" />
+                <RemotePhoto src={photos[index]} sizes="(max-width: 700px) 45vw, 300px" />
               ) : (
                 <div className="hotel-facility-photo-empty" aria-hidden="true" />
               )}
@@ -107,7 +108,7 @@ function RoomCard({
   return (
     <li className="room-card">
       {photo ? (
-        <img src={photo} alt="" loading="lazy" />
+        <RemotePhoto src={photo} sizes="(max-width: 700px) 90vw, 380px" />
       ) : (
         <div className="room-card-photo-empty" aria-hidden="true" />
       )}

@@ -1,8 +1,11 @@
 import type { Metadata } from "next";
 import Image from "next/image";
+import { Suspense } from "react";
 import { ArrowRight, ArrowUpRight, Headphones, Hotel, Info, Star } from "lucide-react";
 import { HotelSearchForm } from "@/components/hotel-search-form";
 import { HotelsUnavailable } from "@/components/hotels-unavailable";
+import { RemotePhoto } from "@/components/remote-photo";
+import { WarmOnIntent } from "@/components/warm-on-intent";
 import { FlightLink } from "@/components/flight-transition";
 import { hasFlightBackend } from "@/lib/flight-api";
 import { formatCalendarDate, formatPrice } from "@/lib/flights";
@@ -81,14 +84,21 @@ function DestinationShowcase({ stay }: { stay: StayInput }) {
 function HotelCard({ hotel, stay }: { hotel: HotelSummary; stay: StayInput }) {
   const nights = nightsBetween(stay.checkin, stay.checkout);
   return (
-    <li className="hotel-card">
+    <WarmOnIntent
+      className="hotel-card"
+      url={`/api/warm/hotel?hotelId=${encodeURIComponent(hotel.id)}&${buildStayQuery(stay)}`}
+    >
       <FlightLink
         href={`/hotels/${encodeURIComponent(hotel.id)}?${buildStayQuery(stay)}`}
         className="hotel-card-link"
       >
         <span className="hotel-card-photo">
           {hotel.photo ? (
-            <img className="hotel-photo" src={hotel.photo} alt="" loading="lazy" />
+            <RemotePhoto
+              className="hotel-photo"
+              src={hotel.photo}
+              sizes="(max-width: 600px) 90vw, (max-width: 1000px) 45vw, 380px"
+            />
           ) : (
             <span className="hotel-photo hotel-photo-empty" aria-hidden="true">
               <Hotel size={30} />
@@ -119,7 +129,30 @@ function HotelCard({ hotel, stay }: { hotel: HotelSummary; stay: StayInput }) {
           </span>
         </span>
       </FlightLink>
-    </li>
+    </WarmOnIntent>
+  );
+}
+
+// Same footprint as the real grid, so nothing jumps when the hotels arrive.
+function ResultsSkeleton() {
+  return (
+    <div aria-busy="true" aria-label="Finding hotels">
+      <div className="hotel-results-head">
+        <div>
+          <span className="eyebrow">FINDING HOTELS FOR YOUR DATES</span>
+          <h2>Checking rooms and prices…</h2>
+        </div>
+      </div>
+      <ul className="hotel-grid">
+        {Array.from({ length: 6 }, (_, index) => (
+          <li className="hotel-card hotel-card-skeleton" key={index}>
+            <span className="skeleton-photo" />
+            <span className="skeleton-line" />
+            <span className="skeleton-line short" />
+          </li>
+        ))}
+      </ul>
+    </div>
   );
 }
 
@@ -229,7 +262,11 @@ export default async function HotelsPage({ searchParams }: { searchParams: Promi
             {problem}
           </p>
         )}
-        {stay && <Results stay={stay} />}
+        {stay && (
+          <Suspense key={buildStayQuery(stay)} fallback={<ResultsSkeleton />}>
+            <Results stay={stay} />
+          </Suspense>
+        )}
       </div>
 
       <DestinationShowcase stay={shownStay} />
