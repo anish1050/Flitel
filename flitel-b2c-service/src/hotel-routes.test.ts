@@ -1,6 +1,58 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import app from "./index.js";
 
+const { attempts, mongo } = vi.hoisted(() => ({
+  attempts: new Map<string, Record<string, unknown>>(),
+  mongo: {
+    down: false,
+    throwsOnConnect: false,
+    hideNextLookup: false,
+    failInsert: false,
+    failUpdate: false,
+  },
+}));
+vi.mock("./mongodb.js", async () => {
+  const { MongoServerError } = await import("mongodb");
+  const ensureUp = () => {
+    if (mongo.down) throw new Error("mongodb://user:secret@host unavailable");
+  };
+  const database = {
+    collection: () => ({
+      findOne: async ({ _id }: { _id: string }) => {
+        ensureUp();
+        if (mongo.hideNextLookup) {
+          mongo.hideNextLookup = false;
+          return null;
+        }
+        return attempts.get(_id) ?? null;
+      },
+      insertOne: async (document: { _id: string }) => {
+        ensureUp();
+        if (mongo.failInsert) throw new Error("write concern failure");
+        if (attempts.has(document._id))
+          throw new MongoServerError({ message: "duplicate key", code: 11000 });
+        attempts.set(document._id, { ...document });
+        return { acknowledged: true };
+      },
+      updateOne: async (
+        { _id }: { _id: string },
+        update: { $set: Record<string, unknown> },
+      ) => {
+        ensureUp();
+        if (mongo.failUpdate) throw new Error("write concern failure");
+        Object.assign(attempts.get(_id)!, update.$set);
+        return { acknowledged: true };
+      },
+    }),
+  };
+  return {
+    getDatabase: () => {
+      if (mongo.throwsOnConnect) throw new Error("MONGODB_URI is not set");
+      return database;
+    },
+  };
+});
+
 const fetchMock = vi.fn<typeof fetch>();
 
 const stay = {
@@ -57,6 +109,12 @@ const callTo = (fragment: string) =>
   fetchMock.mock.calls.filter(([url]) => String(url).includes(fragment));
 
 beforeEach(() => {
+  attempts.clear();
+  mongo.down = false;
+  mongo.throwsOnConnect = false;
+  mongo.hideNextLookup = false;
+  mongo.failInsert = false;
+  mongo.failUpdate = false;
   vi.useFakeTimers({ toFake: ["Date"] });
   vi.setSystemTime(new Date("2026-10-12T09:00:00Z"));
   vi.stubEnv("LITEAPI_KEY", "sand_example_key");
@@ -333,5 +391,369 @@ describe("POST /api/hotels/:hotelId/rates", () => {
     const timedOut = await post("/api/hotels/lp1/rates", roomsStay);
     expect(timedOut.status).toBe(504);
     expect((await timedOut.json()).error.code).toBe("HOTELS_TIMEOUT");
+  });
+});
+
+const prebookResponse = (changes: Record<string, unknown> = {}) => ({
+  data: {
+    prebookId: "pb_123",
+    hotelId: "lp1",
+    checkin: "2026-11-01",
+    checkout: "2026-11-04",
+    currency: "INR",
+    price: 27000,
+    priceDifferencePercent: 0,
+    cancellationChanged: false,
+    boardChanged: false,
+    transactionId: "tr_456",
+    secretKey: "secret_789",
+    roomTypes: [{ rates: [{ cancellationPolicies: { refundableTag: "RFN" } }] }],
+    ...changes,
+  },
+  sandbox: true,
+});
+const bookResponse = { data: { bookingId: "bk_1", status: "CONFIRMED" }, sandbox: true };
+const storedBooking = {
+  data: {
+    bookingId: "bk_1",
+    status: "CONFIRMED",
+    clientReference: "ignored",
+    hotelConfirmationCode: "HC-9",
+    hotel: { hotelId: "lp1", name: "Taj Example" },
+    checkin: "2026-11-01",
+    checkout: "2026-11-04",
+    holder: {
+      firstName: "Priya",
+      lastName: "Sharma",
+      email: "priya@example.com",
+      phone: "+919876543210",
+    },
+    price: 27000,
+    currency: "INR",
+    cancellationPolicies: { refundableTag: "NRFN", cancelPolicyInfos: [] },
+  },
+};
+const errorBody = (code: number) => ({ error: { code, description: "x", message: "x" } });
+
+type LiteapiReply = () => Response | Promise<Response>;
+function bookingReplies(
+  replies: Partial<Record<"prebook" | "book" | "bookings", LiteapiReply>> = {},
+) {
+  const {
+    prebook = () => Response.json(prebookResponse()),
+    book = () => Response.json(bookResponse),
+    bookings = () => Response.json(storedBooking),
+  } = replies;
+  fetchMock.mockImplementation(async (input) => {
+    const path = new URL(String(input)).pathname;
+    if (path === "/v3.0/rates/prebook") return prebook();
+    if (path === "/v3.0/rates/book") return book();
+    if (path.startsWith("/v3.0/bookings/")) return bookings();
+    throw new Error(`Unexpected LiteAPI call ${path}`);
+  });
+}
+const bookCalls = () => callTo("/rates/book");
+
+describe("POST /api/hotels/prebook", () => {
+  it("prebooks with the payment SDK and returns what the card form needs", async () => {
+    bookingReplies();
+
+    const response = await post("/api/hotels/prebook", { offerId: "offer_abc123" });
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({
+      data: {
+        prebookId: "pb_123",
+        transactionId: "tr_456",
+        secretKey: "secret_789",
+        hotelId: "lp1",
+        checkin: "2026-11-01",
+        checkout: "2026-11-04",
+        price: { amount: 27000, currency: "INR" },
+        priceDifferencePercent: 0,
+        cancellationChanged: false,
+        boardChanged: false,
+        refundable: true,
+      },
+    });
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url).toBe("https://book.liteapi.travel/v3.0/rates/prebook");
+    expect(new Headers(init?.headers).get("X-API-Key")).toBe("sand_example_key");
+    expect(JSON.parse(String(init?.body))).toEqual({
+      offerId: "offer_abc123",
+      usePaymentSdk: true,
+    });
+  });
+
+  it("maps supplier errors", async () => {
+    const cases: [LiteapiReply, number, string][] = [
+      [() => Response.json(errorBody(4040), { status: 408 }), 410, "OFFER_UNAVAILABLE"],
+      [() => Response.json(errorBody(4040), { status: 400 }), 410, "OFFER_UNAVAILABLE"],
+      [() => Response.json(errorBody(4002), { status: 400 }), 410, "OFFER_UNAVAILABLE"],
+      [() => Response.json(errorBody(4016), { status: 408 }), 502, "HOTELS_UNAVAILABLE"],
+      [() => Response.json({}, { status: 401 }), 503, "HOTELS_UNAVAILABLE"],
+      [() => new Response("boom", { status: 500 }), 502, "HOTELS_UNAVAILABLE"],
+      [() => Promise.reject(new DOMException("t", "TimeoutError")), 504, "HOTELS_TIMEOUT"],
+      [
+        () => Response.json(prebookResponse({ secretKey: undefined })),
+        502,
+        "LITEAPI_INVALID_RESPONSE",
+      ],
+      [
+        () => Response.json({ ...prebookResponse(), sandbox: false }),
+        503,
+        "LITEAPI_LIVE_REFUSED",
+      ],
+    ];
+    for (const [prebook, status, code] of cases) {
+      fetchMock.mockReset();
+      bookingReplies({ prebook });
+      const response = await post("/api/hotels/prebook", { offerId: "offer_abc123" });
+      expect([response.status, (await response.json()).error.code]).toEqual([status, code]);
+    }
+  });
+
+  it("validates the offer id and needs a key, calling nothing", async () => {
+    bookingReplies();
+    expect((await post("/api/hotels/prebook", { offerId: "x" })).status).toBe(400);
+    expect((await post("/api/hotels/prebook", "not json", true)).status).toBe(400);
+
+    vi.stubEnv("LITEAPI_KEY", "");
+    const response = await post("/api/hotels/prebook", { offerId: "offer_abc123" });
+    expect(response.status).toBe(503);
+    expect((await response.json()).error.code).toBe("LITEAPI_NOT_CONFIGURED");
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+});
+
+const guest = {
+  firstName: "Priya",
+  lastName: "Sharma",
+  email: "priya@example.com",
+  phone: "+919876543210",
+};
+const hotelBooking = (changes: Record<string, unknown> = {}) => ({
+  attemptId: crypto.randomUUID(),
+  prebookId: "pb_123",
+  transactionId: "tr_456",
+  expectedTotal: 27000,
+  expectedCurrency: "INR",
+  holder: guest,
+  ...changes,
+});
+const placeBooking = (body: unknown) => post("/api/hotel-bookings", body);
+
+describe("POST /api/hotel-bookings", () => {
+  it("books once, answers with the booking id and replays it for the same attempt", async () => {
+    bookingReplies();
+    const request = hotelBooking();
+
+    const first = await placeBooking(request);
+    expect(first.status).toBe(200);
+    expect(await first.json()).toEqual({ data: { bookingId: "bk_1" } });
+
+    const [url, init] = bookCalls()[0];
+    expect(url).toBe("https://book.liteapi.travel/v3.0/rates/book");
+    expect(JSON.parse(String(init?.body))).toEqual({
+      prebookId: "pb_123",
+      clientReference: request.attemptId,
+      holder: guest,
+      guests: [
+        {
+          occupancyNumber: 1,
+          firstName: "Priya",
+          lastName: "Sharma",
+          email: "priya@example.com",
+        },
+      ],
+      payment: { method: "TRANSACTION_ID", transactionId: "tr_456" },
+    });
+
+    const repeat = await placeBooking(request);
+    expect(await repeat.json()).toEqual({ data: { bookingId: "bk_1" } });
+    expect(bookCalls()).toHaveLength(1);
+    expect(attempts.get(request.attemptId)).toMatchObject({
+      _id: request.attemptId,
+      offerId: "pb_123",
+      amount: "27000",
+      currency: "INR",
+      status: "confirmed",
+      orderId: "bk_1",
+    });
+    expect(JSON.stringify([...attempts.values()])).not.toMatch(
+      /Priya|Sharma|example\.com|9876543210/,
+    );
+  });
+
+  it("reports an unknown outcome and never books twice for the same attempt", async () => {
+    const replies: LiteapiReply[] = [
+      () => Promise.reject(new DOMException("timed out", "TimeoutError")),
+      () => new Response("upstream failure", { status: 500 }),
+      () => new Response("not json", { status: 200 }),
+      () => Response.json({ data: { bookingId: "bk_1", status: "PENDING" } }),
+      () => Response.json({ ...bookResponse, sandbox: false }),
+      () => Response.json(errorBody(4005), { status: 400 }),
+      () => Response.json(errorBody(2014), { status: 400 }),
+    ];
+    for (const book of replies) {
+      fetchMock.mockReset();
+      bookingReplies({ book });
+      const request = hotelBooking();
+
+      const response = await placeBooking(request);
+      expect(response.status).toBe(202);
+      expect(await response.json()).toEqual({ data: { status: "checking" } });
+      expect(attempts.get(request.attemptId)?.status).toBe("unknown");
+
+      const repeat = await placeBooking(request);
+      expect(repeat.status).toBe(202);
+      expect(bookCalls()).toHaveLength(1);
+    }
+  });
+
+  it("records explicit rejections and replays them as BOOKING_FAILED", async () => {
+    const cases: [LiteapiReply, number, string][] = [
+      [() => Response.json(errorBody(4003), { status: 400 }), 422, "BOOKING_REJECTED"],
+      [() => Response.json(errorBody(4012), { status: 410 }), 410, "ROOM_UNAVAILABLE"],
+      [() => Response.json(errorBody(2013), { status: 400 }), 410, "ROOM_UNAVAILABLE"],
+      [() => Response.json({}, { status: 401 }), 503, "HOTELS_UNAVAILABLE"],
+    ];
+    for (const [book, status, code] of cases) {
+      fetchMock.mockReset();
+      bookingReplies({ book });
+      const request = hotelBooking();
+
+      const response = await placeBooking(request);
+      expect([response.status, (await response.json()).error.code]).toEqual([status, code]);
+      expect(attempts.get(request.attemptId)?.status).toBe("failed");
+
+      const repeat = await placeBooking(request);
+      expect(repeat.status).toBe(422);
+      expect((await repeat.json()).error.code).toBe("BOOKING_FAILED");
+      expect(bookCalls()).toHaveLength(1);
+    }
+  });
+
+  it("answers with the real outcome when recording it fails, and replays checking", async () => {
+    bookingReplies();
+    mongo.failUpdate = true;
+    const request = hotelBooking();
+
+    const first = await placeBooking(request);
+    expect(first.status).toBe(200);
+    expect(await first.json()).toEqual({ data: { bookingId: "bk_1" } });
+    expect(attempts.get(request.attemptId)?.status).toBe("pending");
+
+    const repeat = await placeBooking(request);
+    expect(repeat.status).toBe(202);
+    expect(await repeat.json()).toEqual({ data: { status: "checking" } });
+    expect(bookCalls()).toHaveLength(1);
+  });
+
+  it("treats a lost claim race as checking and never books", async () => {
+    bookingReplies();
+    const request = hotelBooking();
+    attempts.set(request.attemptId, { _id: request.attemptId, status: "pending" });
+    mongo.hideNextLookup = true;
+
+    const response = await placeBooking(request);
+
+    expect(response.status).toBe(202);
+    expect(await response.json()).toEqual({ data: { status: "checking" } });
+    expect(bookCalls()).toHaveLength(0);
+  });
+
+  it("books nothing while the database is unavailable", async () => {
+    for (const unavailable of ["down", "throwsOnConnect", "failInsert"] as const) {
+      bookingReplies();
+      mongo[unavailable] = true;
+      fetchMock.mockClear();
+
+      const response = await placeBooking(hotelBooking());
+
+      expect(response.status).toBe(503);
+      const text = await response.text();
+      expect(JSON.parse(text).error.code).toBe("BOOKINGS_UNAVAILABLE");
+      expect(text).not.toContain("secret");
+      expect(fetchMock).not.toHaveBeenCalled();
+      mongo[unavailable] = false;
+    }
+  });
+
+  it("validates the body and the size before touching MongoDB or LiteAPI", async () => {
+    bookingReplies();
+    for (const changes of [
+      { attemptId: "1" },
+      { expectedTotal: 0 },
+      { holder: { ...guest, phone: "123" } },
+      { holder: { ...guest, email: "x" } },
+    ]) {
+      const response = await placeBooking(hotelBooking(changes));
+      expect(response.status).toBe(400);
+      expect((await response.json()).error.code).toBe("INVALID_BOOKING");
+    }
+    expect((await placeBooking({ ...hotelBooking(), padding: "x".repeat(9 * 1024) })).status).toBe(
+      413,
+    );
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(attempts.size).toBe(0);
+  });
+
+  it("is 503 without a key and records nothing", async () => {
+    bookingReplies();
+    vi.stubEnv("LITEAPI_KEY", "");
+
+    const response = await placeBooking(hotelBooking());
+
+    expect(response.status).toBe(503);
+    expect((await response.json()).error.code).toBe("LITEAPI_NOT_CONFIGURED");
+    expect(attempts.size).toBe(0);
+  });
+});
+
+describe("GET /api/hotel-bookings/:bookingId", () => {
+  it("reads the booking back without the phone number", async () => {
+    bookingReplies();
+
+    const response = await app.request("/api/hotel-bookings/bk_1");
+
+    expect(response.status).toBe(200);
+    const text = await response.text();
+    expect(JSON.parse(text)).toEqual({
+      data: {
+        bookingId: "bk_1",
+        status: "CONFIRMED",
+        hotel: { id: "lp1", name: "Taj Example" },
+        checkin: "2026-11-01",
+        checkout: "2026-11-04",
+        holder: { firstName: "Priya", lastName: "Sharma", email: "priya@example.com" },
+        price: 27000,
+        currency: "INR",
+        cancellation: { refundableTag: "NRFN", cancelPolicyInfos: [] },
+        hotelConfirmationCode: "HC-9",
+      },
+    });
+    expect(text).not.toContain("9876543210");
+    expect(fetchMock.mock.calls[0][0]).toBe("https://book.liteapi.travel/v3.0/bookings/bk_1");
+  });
+
+  it("maps a missing booking, a bad id and supplier failures", async () => {
+    bookingReplies();
+    expect((await app.request("/api/hotel-bookings/a%20b")).status).toBe(400);
+    expect((await app.request("/api/hotel-bookings/ab")).status).toBe(400);
+
+    const cases: [LiteapiReply, number, string][] = [
+      [() => new Response(null, { status: 404 }), 404, "BOOKING_NOT_FOUND"],
+      [() => new Response(null, { status: 204 }), 404, "BOOKING_NOT_FOUND"],
+      [() => new Response("boom", { status: 500 }), 502, "HOTELS_UNAVAILABLE"],
+      [() => Promise.reject(new DOMException("t", "TimeoutError")), 502, "HOTELS_UNAVAILABLE"],
+      [() => Response.json({ data: {} }), 502, "LITEAPI_INVALID_RESPONSE"],
+    ];
+    for (const [bookings, status, code] of cases) {
+      fetchMock.mockReset();
+      bookingReplies({ bookings });
+      const response = await app.request("/api/hotel-bookings/bk_1");
+      expect([response.status, (await response.json()).error.code]).toEqual([status, code]);
+    }
   });
 });

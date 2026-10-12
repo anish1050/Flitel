@@ -1,9 +1,28 @@
 import { Hono } from "hono";
+import type { Context } from "hono";
 import { bodyLimit } from "hono/body-limit";
+import {
+  claimBookingAttempt,
+  findBookingAttempt,
+  recordBookingOutcome,
+} from "./booking-attempts.js";
+import type { BookingAttempt } from "./booking-attempts.js";
 import { raiseApiError } from "./duffel.js";
-import { normaliseRooms, roomsStaySchema, staySchema, summariseHotels } from "./hotels.js";
+import {
+  buildLiteapiBook,
+  classifyBookResponse,
+  hotelBookingRequestSchema,
+  normaliseBooking,
+  normalisePrebook,
+  normaliseRooms,
+  prebookRequestSchema,
+  roomsStaySchema,
+  staySchema,
+  summariseHotels,
+} from "./hotels.js";
 import {
   assertSandbox,
+  liteapiErrorCode,
   LiteapiUnreachable,
   requestLiteapi,
   requireLiteapiKey,
@@ -12,13 +31,22 @@ import {
 const hotelIdPattern = /^[A-Za-z0-9_-]{2,40}$/;
 const isSuccess = (status: number) => status >= 200 && status < 300;
 
-// Mounted under /api; later hotel routes (prebook, bookings) are added here.
+// Mounted under /api.
 export const hotelRoutes = new Hono();
 
 hotelRoutes.use(
   "/hotels/*",
   bodyLimit({
     maxSize: 4096,
+    onError: () =>
+      raiseApiError(413, "REQUEST_TOO_LARGE", "The request body is too large."),
+  }),
+);
+
+hotelRoutes.use(
+  "/hotel-bookings",
+  bodyLimit({
+    maxSize: 8 * 1024,
     onError: () =>
       raiseApiError(413, "REQUEST_TOO_LARGE", "The request body is too large."),
   }),
@@ -110,4 +138,167 @@ hotelRoutes.post("/hotels/:hotelId/rates", async (context) => {
   return context.json({
     data: normaliseRooms(response, hotelId, await details),
   });
+});
+
+hotelRoutes.post("/hotels/prebook", async (context) => {
+  const parsed = prebookRequestSchema.safeParse(await readJson(context.req.raw));
+  if (!parsed.success) raiseApiError(400, "INVALID_OFFER_ID", "Choose a valid room.");
+  requireLiteapiKey();
+
+  let result;
+  try {
+    result = await requestLiteapi("book", "/rates/prebook", {
+      method: "POST",
+      body: { offerId: parsed.data.offerId, usePaymentSdk: true },
+      timeoutMs: 30_000,
+    });
+  } catch (error) {
+    if (error instanceof LiteapiUnreachable) {
+      raiseApiError(504, "HOTELS_TIMEOUT", "Reserving the room took too long. Please try again.");
+    }
+    throw error;
+  }
+
+  if (!isSuccess(result.status)) {
+    const code = liteapiErrorCode(result.body);
+    if (code === 4040 || code === 4002) {
+      raiseApiError(410, "OFFER_UNAVAILABLE", "This room is no longer available.");
+    }
+    const unavailable = result.status === 401 ? 503 : 502;
+    raiseApiError(
+      unavailable,
+      "HOTELS_UNAVAILABLE",
+      "Hotels are unavailable right now. Nothing was booked.",
+    );
+  }
+  assertSandbox(result.body);
+  try {
+    return context.json({ data: normalisePrebook(result.body) });
+  } catch {
+    raiseApiError(
+      502,
+      "LITEAPI_INVALID_RESPONSE",
+      "The hotel supplier returned an invalid response. Please try again.",
+    );
+  }
+});
+
+const checkingBooking = { data: { status: "checking" } } as const;
+
+function replayBooking(context: Context, attempt: BookingAttempt) {
+  if (attempt.status === "confirmed" && attempt.orderId) {
+    return context.json({ data: { bookingId: attempt.orderId } });
+  }
+  if (attempt.status === "failed") {
+    raiseApiError(422, "BOOKING_FAILED", "This booking could not be completed.");
+  }
+  return context.json(checkingBooking, 202);
+}
+
+function bookingsUnavailable(): never {
+  raiseApiError(
+    503,
+    "BOOKINGS_UNAVAILABLE",
+    "Booking is temporarily unavailable. Nothing was booked.",
+  );
+}
+
+hotelRoutes.post("/hotel-bookings", async (context) => {
+  const parsed = hotelBookingRequestSchema.safeParse(await readJson(context.req.raw));
+  if (!parsed.success) {
+    raiseApiError(
+      400,
+      "INVALID_BOOKING",
+      parsed.error.issues[0]?.message ?? "Check the guest details.",
+    );
+  }
+  const booking = parsed.data;
+  requireLiteapiKey();
+
+  const earlier = await findBookingAttempt(booking.attemptId).catch(bookingsUnavailable);
+  if (earlier) return replayBooking(context, earlier);
+
+  // After this claim, never raise an error code the frontend treats as nothing-booked.
+  const claimedElsewhere = await claimBookingAttempt({
+    _id: booking.attemptId,
+    offerId: booking.prebookId,
+    amount: String(booking.expectedTotal),
+    currency: booking.expectedCurrency,
+  }).catch(bookingsUnavailable);
+  if (claimedElsewhere) return replayBooking(context, claimedElsewhere);
+
+  const outcome = classifyBookResponse(
+    await requestLiteapi("book", "/rates/book", {
+      method: "POST",
+      body: buildLiteapiBook(booking),
+      timeoutMs: 60_000,
+    }).catch(() => "unreachable" as const),
+  );
+  // A failed write only loses the replay; the customer must still see the real outcome.
+  const record = (status: "confirmed" | "failed" | "unknown", bookingId?: string) =>
+    recordBookingOutcome(booking.attemptId, status, bookingId).catch(() => {});
+
+  switch (outcome.kind) {
+    case "confirmed":
+      await record("confirmed", outcome.bookingId);
+      return context.json({ data: { bookingId: outcome.bookingId } });
+    case "rejected":
+      await record("failed");
+      raiseApiError(
+        422,
+        "BOOKING_REJECTED",
+        "The hotel could not accept these details. Please check them and try again.",
+      );
+    case "room-unavailable":
+      await record("failed");
+      raiseApiError(
+        410,
+        "ROOM_UNAVAILABLE",
+        "This room is no longer available, so the booking could not be completed.",
+      );
+    case "not-authorised":
+      await record("failed");
+      raiseApiError(
+        503,
+        "HOTELS_UNAVAILABLE",
+        "Hotels are unavailable right now. Nothing was booked.",
+      );
+    case "unknown":
+      await record("unknown");
+      return context.json(checkingBooking, 202);
+  }
+});
+
+const bookingIdPattern = /^[A-Za-z0-9_-]{3,60}$/;
+
+hotelRoutes.get("/hotel-bookings/:bookingId", async (context) => {
+  const bookingId = context.req.param("bookingId");
+  if (!bookingIdPattern.test(bookingId)) {
+    raiseApiError(400, "INVALID_BOOKING_ID", "Choose a valid booking.");
+  }
+  requireLiteapiKey();
+
+  const result = await requestLiteapi("book", `/bookings/${encodeURIComponent(bookingId)}`).catch(
+    () => undefined,
+  );
+  if (!result || (!isSuccess(result.status) && result.status !== 404)) {
+    raiseApiError(
+      502,
+      "HOTELS_UNAVAILABLE",
+      "Hotels are unavailable right now. Please try again.",
+    );
+  }
+  if (result.status === 404 || result.status === 204) {
+    raiseApiError(404, "BOOKING_NOT_FOUND", "We could not find this booking.");
+  }
+  assertSandbox(result.body);
+  try {
+    return context.json({ data: normaliseBooking(result.body) });
+  } catch {
+    raiseApiError(
+      502,
+      "LITEAPI_INVALID_RESPONSE",
+      "The hotel supplier returned an invalid response. Please try again.",
+    );
+  }
 });

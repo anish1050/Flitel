@@ -1,6 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  buildLiteapiBook,
+  classifyBookResponse,
+  hotelBookingRequestSchema,
+  normaliseBooking,
+  normalisePrebook,
   normaliseRooms,
+  prebookRequestSchema,
   roomsStaySchema,
   staySchema,
   summariseHotels,
@@ -328,5 +334,275 @@ describe("stay schemas", () => {
     expect(
       roomsStaySchema.safeParse({ ...withoutPlace, checkin: "2026-10-01" }).success,
     ).toBe(false);
+  });
+});
+
+const prebookBody = (changes: Record<string, unknown> = {}) => ({
+  data: {
+    prebookId: "pb_123",
+    hotelId: "lp1",
+    checkin: "2026-11-01",
+    checkout: "2026-11-04",
+    currency: "INR",
+    price: 27000,
+    priceDifferencePercent: 0,
+    cancellationChanged: false,
+    boardChanged: false,
+    transactionId: "tr_456",
+    secretKey: "secret_789",
+    roomTypes: [{ rates: [{ cancellationPolicies: { refundableTag: "RFN" } }] }],
+    ...changes,
+  },
+});
+
+describe("prebookRequestSchema", () => {
+  it("accepts an offer id and rejects odd characters or lengths", () => {
+    expect(prebookRequestSchema.safeParse({ offerId: "abc_DEF-12=34/+." }).success).toBe(true);
+    expect(prebookRequestSchema.safeParse({ offerId: "short" }).success).toBe(false);
+    expect(prebookRequestSchema.safeParse({ offerId: "has space in it" }).success).toBe(false);
+    expect(prebookRequestSchema.safeParse({ offerId: "x".repeat(4001) }).success).toBe(false);
+  });
+});
+
+describe("normalisePrebook", () => {
+  it("keeps only what the page needs and derives refundable", () => {
+    expect(normalisePrebook(prebookBody())).toEqual({
+      prebookId: "pb_123",
+      transactionId: "tr_456",
+      secretKey: "secret_789",
+      hotelId: "lp1",
+      checkin: "2026-11-01",
+      checkout: "2026-11-04",
+      price: { amount: 27000, currency: "INR" },
+      priceDifferencePercent: 0,
+      cancellationChanged: false,
+      boardChanged: false,
+      refundable: true,
+    });
+  });
+
+  it("is not refundable when any rate is non-refundable or there are none", () => {
+    const mixed = prebookBody({
+      roomTypes: [
+        { rates: [{ cancellationPolicies: { refundableTag: "RFN" } }] },
+        { rates: [{ cancellationPolicies: { refundableTag: "NRFN" } }] },
+      ],
+    });
+    expect(normalisePrebook(mixed).refundable).toBe(false);
+    expect(normalisePrebook(prebookBody({ roomTypes: undefined })).refundable).toBe(false);
+  });
+
+  it("passes the change flags through", () => {
+    const changed = normalisePrebook(
+      prebookBody({ priceDifferencePercent: 4.5, cancellationChanged: true, boardChanged: true }),
+    );
+    expect(changed).toMatchObject({
+      priceDifferencePercent: 4.5,
+      cancellationChanged: true,
+      boardChanged: true,
+    });
+  });
+
+  it("throws on an incomplete body", () => {
+    for (const missing of ["prebookId", "transactionId", "secretKey", "price", "currency"]) {
+      expect(() => normalisePrebook(prebookBody({ [missing]: undefined }))).toThrow();
+    }
+    expect(() => normalisePrebook(null)).toThrow();
+    expect(() => normalisePrebook({ data: {} })).toThrow();
+  });
+});
+
+const holder = {
+  firstName: "Priya",
+  lastName: "Sharma",
+  email: "priya@example.com",
+  phone: "+919876543210",
+};
+const bookingRequest = (changes: Record<string, unknown> = {}) => ({
+  attemptId: "7d1f1c0e-2c1f-4c4e-9f33-0f6a2c0b5a11",
+  prebookId: "pb_123",
+  transactionId: "tr_456",
+  expectedTotal: 27000,
+  expectedCurrency: "INR",
+  holder,
+  ...changes,
+});
+
+describe("hotelBookingRequestSchema", () => {
+  it("accepts a complete request and trims names", () => {
+    const parsed = hotelBookingRequestSchema.parse(
+      bookingRequest({ holder: { ...holder, firstName: "  Priya " } }),
+    );
+    expect(parsed.holder.firstName).toBe("Priya");
+  });
+
+  it("rejects each invalid field", () => {
+    for (const changes of [
+      { attemptId: "1" },
+      { prebookId: "a b" },
+      { transactionId: "x" },
+      { expectedTotal: 0 },
+      { expectedTotal: "27000" },
+      { expectedCurrency: "inr" },
+      { holder: { ...holder, firstName: "" } },
+      { holder: { ...holder, lastName: "Sharma3" } },
+      { holder: { ...holder, email: "nope" } },
+      { holder: { ...holder, phone: "9876543210" } },
+    ]) {
+      expect(hotelBookingRequestSchema.safeParse(bookingRequest(changes)).success).toBe(false);
+    }
+  });
+});
+
+describe("buildLiteapiBook", () => {
+  it("builds the LiteAPI book body with the attempt as clientReference", () => {
+    const request = hotelBookingRequestSchema.parse(bookingRequest());
+    expect(buildLiteapiBook(request)).toEqual({
+      prebookId: "pb_123",
+      clientReference: "7d1f1c0e-2c1f-4c4e-9f33-0f6a2c0b5a11",
+      holder,
+      guests: [
+        {
+          occupancyNumber: 1,
+          firstName: "Priya",
+          lastName: "Sharma",
+          email: "priya@example.com",
+        },
+      ],
+      payment: { method: "TRANSACTION_ID", transactionId: "tr_456" },
+    });
+  });
+});
+
+describe("classifyBookResponse", () => {
+  const reply = (status: number, body: unknown) => ({ status, body });
+  const error = (code: number) => ({ error: { code, description: "x", message: "x" } });
+  const confirmed = { data: { bookingId: "bk_1", status: "CONFIRMED" }, sandbox: true };
+
+  it("confirms only a 200 CONFIRMED with a booking id", () => {
+    expect(classifyBookResponse(reply(200, confirmed))).toEqual({
+      kind: "confirmed",
+      bookingId: "bk_1",
+    });
+    expect(
+      classifyBookResponse(reply(200, { data: { bookingId: "bk_1", status: "CONFIRMED" } })),
+    ).toEqual({ kind: "confirmed", bookingId: "bk_1" });
+  });
+
+  it("treats a 200 that is not a clear confirmation as unknown", () => {
+    for (const body of [
+      { data: { bookingId: "bk_1", status: "PENDING" } },
+      { data: { bookingId: "", status: "CONFIRMED" } },
+      { data: { status: "CONFIRMED" } },
+      { data: { bookingId: 12, status: "CONFIRMED" } },
+      null,
+      "not json",
+    ]) {
+      expect(classifyBookResponse(reply(200, body))).toEqual({ kind: "unknown" });
+    }
+  });
+
+  it("never confirms a response from live mode", () => {
+    expect(classifyBookResponse(reply(200, { ...confirmed, sandbox: false }))).toEqual({
+      kind: "unknown",
+    });
+  });
+
+  it("rejects only on a 400 with an invalid-request code", () => {
+    for (const code of [4000, 4002, 4003, 4010]) {
+      expect(classifyBookResponse(reply(400, error(code)))).toEqual({ kind: "rejected" });
+    }
+    expect(classifyBookResponse(reply(400, { error: { code: "4003" } }))).toEqual({
+      kind: "rejected",
+    });
+  });
+
+  it("reports an unavailable room on 410 or codes 4012 and 2013", () => {
+    expect(classifyBookResponse(reply(410, error(4012)))).toEqual({ kind: "room-unavailable" });
+    expect(classifyBookResponse(reply(410, null))).toEqual({ kind: "room-unavailable" });
+    expect(classifyBookResponse(reply(400, error(2013)))).toEqual({ kind: "room-unavailable" });
+    expect(classifyBookResponse(reply(400, error(4012)))).toEqual({ kind: "room-unavailable" });
+  });
+
+  it("reports an authorisation failure on 401 and 403", () => {
+    expect(classifyBookResponse(reply(401, null))).toEqual({ kind: "not-authorised" });
+    expect(classifyBookResponse(reply(403, error(4000)))).toEqual({ kind: "not-authorised" });
+  });
+
+  it("falls through to unknown for everything unproven", () => {
+    expect(classifyBookResponse("unreachable")).toEqual({ kind: "unknown" });
+    for (const [status, body] of [
+      [500, null],
+      [502, "<html>"],
+      [503, error(5000)],
+      [500, error(4012)],
+      [400, error(2014)],
+      [400, error(4005)],
+      [400, error(5000)],
+      [400, null],
+      [404, null],
+      [429, null],
+      [201, confirmed],
+    ] as const) {
+      expect(classifyBookResponse(reply(status, body))).toEqual({ kind: "unknown" });
+    }
+  });
+});
+
+describe("normaliseBooking", () => {
+  const stored = {
+    data: {
+      bookingId: "bk_1",
+      status: "CONFIRMED",
+      clientReference: "7d1f1c0e-2c1f-4c4e-9f33-0f6a2c0b5a11",
+      hotelConfirmationCode: "HC-9",
+      hotel: { hotelId: "lp1", name: "Taj Example" },
+      checkin: "2026-11-01",
+      checkout: "2026-11-04",
+      holder,
+      price: 27000,
+      currency: "INR",
+      cancellationPolicies: {
+        refundableTag: "RFN",
+        cancelPolicyInfos: [
+          { cancelTime: "2026-10-30T00:00:00Z", amount: 0, currency: "INR", timezone: "UTC" },
+        ],
+      },
+      bookedRooms: [{ roomType: { name: "Deluxe" } }],
+      createdAt: "2026-10-12T09:00:00Z",
+    },
+  };
+
+  it("returns the confirmation fields without phone or client reference", () => {
+    const booking = normaliseBooking(stored);
+    expect(booking).toEqual({
+      bookingId: "bk_1",
+      status: "CONFIRMED",
+      hotel: { id: "lp1", name: "Taj Example" },
+      checkin: "2026-11-01",
+      checkout: "2026-11-04",
+      holder: { firstName: "Priya", lastName: "Sharma", email: "priya@example.com" },
+      price: 27000,
+      currency: "INR",
+      cancellation: {
+        refundableTag: "RFN",
+        cancelPolicyInfos: [{ cancelTime: "2026-10-30T00:00:00Z", amount: 0, currency: "INR" }],
+      },
+      hotelConfirmationCode: "HC-9",
+    });
+    expect(JSON.stringify(booking)).not.toMatch(/9876543210|7d1f1c0e/);
+  });
+
+  it("tolerates missing cancellation terms and confirmation code", () => {
+    const { cancellationPolicies: _c, hotelConfirmationCode: _h, ...rest } = stored.data;
+    const booking = normaliseBooking({ data: rest });
+    expect(booking.cancellation).toEqual({ cancelPolicyInfos: [] });
+    expect(booking.hotelConfirmationCode).toBeUndefined();
+  });
+
+  it("throws when the booking id or price is missing", () => {
+    expect(() => normaliseBooking({ data: { ...stored.data, bookingId: undefined } })).toThrow();
+    expect(() => normaliseBooking({ data: { ...stored.data, price: undefined } })).toThrow();
+    expect(() => normaliseBooking(null)).toThrow();
   });
 });

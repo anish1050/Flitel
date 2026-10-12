@@ -18,6 +18,7 @@ The server starts without a token or a database connection. Flight endpoints ret
 | `PORT`                | `3001`                                                     | Local server port               |
 | `FRONTEND_ORIGIN`     | `http://127.0.0.1:3000`                                    | Single permitted browser origin |
 | `DUFFEL_ACCESS_TOKEN` | Empty                                                      | Duffel test token, backend only |
+| `LITEAPI_KEY`         | Empty                                                      | LiteAPI sandbox key, backend only |
 | `MONGODB_URI`         | Required; local template uses `mongodb://localhost:27017/` | Server-side database connection |
 | `MONGODB_DBNAME`      | `flitel`                                                   | Database name                   |
 
@@ -36,6 +37,11 @@ Import the [Postman collection](../docs/Flitel%20B2C%20API.postman_collection.js
 | `POST /api/flights/offers/:id/refresh` | `{ "data": <Duffel offer> }` for the same flight, or `404 OFFER_UNAVAILABLE`                |
 | `POST /api/bookings`                   | `{ "data": { "orderId": "ord_..." } }`, or `202 { "data": { "status": "checking" } }` when the outcome is unknown |
 | `GET /api/bookings/:orderId`           | `{ "data": <Duffel order> }`                                                                |
+| `POST /api/hotels/search`              | `{ "data": { "hotels": [...] } }`, cheapest sandbox rate per hotel                          |
+| `POST /api/hotels/:hotelId/rates`      | `{ "data": { "hotel": {...}, "rooms": [...] } }`                                            |
+| `POST /api/hotels/prebook`             | `{ "data": { "prebookId", "transactionId", "secretKey", "price", ... } }`, or `410 OFFER_UNAVAILABLE` |
+| `POST /api/hotel-bookings`             | `{ "data": { "bookingId": "..." } }`, or `202 { "data": { "status": "checking" } }` when the outcome is unknown |
+| `GET /api/hotel-bookings/:bookingId`   | `{ "data": <booking, no phone> }`, or `404 BOOKING_NOT_FOUND`                               |
 
 `POST /api/flights/offers/:id/refresh` takes the search body, runs a fresh uncached search and returns the offer for the same flight (same carrier, flight number and departure times; same fare brand when available, else the cheapest) so an unavailable fare can be replaced.
 
@@ -62,6 +68,12 @@ Refresh the selected offer using its ID. An expired or unavailable offer returns
 Booking accepts `{ attemptId, offerId, expectedTotal, expectedCurrency, travellers, contact }`. `attemptId` is a UUID that the client creates per confirm attempt. Repeating it never books twice; the recorded result is returned instead. The order is paid from the Duffel test balance using the amount of the offer the server has just fetched. `expectedTotal` only detects price changes (`409 PRICE_CHANGED`). A timeout, 5xx or unreadable Duffel reply returns `202 checking`, because seats may have been booked. Attempts are stored in `booking_attempts` without traveller details.
 
 Errors use `{ "error": { "code": "...", "message": "..." } }`. Invalid local input returns 400, oversized requests 413, supplier-rejected searches 422, supplier/configuration outages 502/503 and timeouts 504. Upstream response bodies and credentials are not exposed. Flight responses use `Cache-Control: no-store`.
+
+## Hotels
+
+Hotel search, rooms, prebook and booking use the LiteAPI **sandbox** only (`LITEAPI_KEY`, server side); a response whose `sandbox` flag is present and not `true` is refused. `POST /api/hotels/prebook` fixes the price and returns the `transactionId` and `secretKey` for LiteAPI's payment form. That form charges the card before `POST /api/hotel-bookings` is called, and Flitel never sees card data.
+
+Booking is once-only per `attemptId`: the attempt is claimed in `booking_attempts` before the book call (its `offerId` field holds the prebook id, `orderId` the booking id) and the same id is sent as LiteAPI's `clientReference`. Only a `CONFIRMED` reply or an explicit rejection (invalid request, room unavailable, not authorised) is recorded as such. Anything else, including timeouts and 5xx, is `unknown` and answers `202 checking`, and a repeat never calls LiteAPI again. Guest details are never stored or logged.
 
 ## Progressive search and cache
 

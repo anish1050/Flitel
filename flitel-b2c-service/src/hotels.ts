@@ -1,5 +1,7 @@
 import { z } from "zod";
 import { raiseApiError } from "./duffel.js";
+import { assertSandbox, liteapiErrorCode } from "./liteapi.js";
+import type { LiteapiResult } from "./liteapi.js";
 
 const maxNights = 30;
 const stayFields = {
@@ -285,5 +287,237 @@ export function normaliseRooms(
         : undefined,
     },
     rooms,
+  };
+}
+
+const guestName = z
+  .string()
+  .trim()
+  .regex(/^[A-Za-z][A-Za-z' -]{0,49}$/, "Use English letters for the guest name.");
+
+export const prebookRequestSchema = z.object({
+  offerId: z.string().regex(/^[A-Za-z0-9_=+/.-]{8,4000}$/),
+});
+
+export const hotelBookingRequestSchema = z.object({
+  attemptId: z.uuid(),
+  prebookId: z.string().regex(/^[A-Za-z0-9_-]{4,100}$/),
+  transactionId: z.string().regex(/^[A-Za-z0-9_-]{4,200}$/),
+  expectedTotal: z.number().positive(),
+  expectedCurrency: z.string().regex(/^[A-Z]{3}$/),
+  holder: z.object({
+    firstName: guestName,
+    lastName: guestName,
+    email: z.email().max(254),
+    phone: z.string().regex(/^\+[1-9]\d{6,14}$/),
+  }),
+});
+export type HotelBookingRequest = z.infer<typeof hotelBookingRequestSchema>;
+
+export type Prebook = {
+  prebookId: string;
+  transactionId: string;
+  secretKey: string;
+  hotelId: string;
+  checkin: string;
+  checkout: string;
+  price: Price;
+  priceDifferencePercent: number;
+  cancellationChanged: boolean;
+  boardChanged: boolean;
+  refundable: boolean;
+};
+
+// Every field here is shown to the customer or sent to the card form, so none is defaulted.
+const prebookSchema = z.looseObject({
+  data: z.looseObject({
+    prebookId: z.string().min(1),
+    transactionId: z.string().min(1),
+    secretKey: z.string().min(1),
+    hotelId: z.string().min(1),
+    checkin: z.string().min(1),
+    checkout: z.string().min(1),
+    price: z.number(),
+    currency: z.string().min(1),
+    priceDifferencePercent: z.number(),
+    cancellationChanged: z.boolean(),
+    boardChanged: z.boolean(),
+    roomTypes: z
+      .array(
+        z.looseObject({
+          rates: z
+            .array(
+              z.looseObject({
+                cancellationPolicies: z
+                  .looseObject({ refundableTag: optionalString })
+                  .nullish(),
+              }),
+            )
+            .nullish(),
+        }),
+      )
+      .nullish(),
+  }),
+});
+
+export function normalisePrebook(raw: unknown): Prebook {
+  const { data } = prebookSchema.parse(raw);
+  const rates = (data.roomTypes ?? []).flatMap((roomType) => roomType.rates ?? []);
+  return {
+    prebookId: data.prebookId,
+    transactionId: data.transactionId,
+    secretKey: data.secretKey,
+    hotelId: data.hotelId,
+    checkin: data.checkin,
+    checkout: data.checkout,
+    price: { amount: data.price, currency: data.currency },
+    priceDifferencePercent: data.priceDifferencePercent,
+    cancellationChanged: data.cancellationChanged,
+    boardChanged: data.boardChanged,
+    refundable:
+      rates.length > 0 &&
+      rates.every((rate) => rate.cancellationPolicies?.refundableTag === "RFN"),
+  };
+}
+
+export function buildLiteapiBook({
+  attemptId,
+  prebookId,
+  transactionId,
+  holder,
+}: HotelBookingRequest) {
+  return {
+    prebookId,
+    // LiteAPI rejects a repeated clientReference as a duplicate, so a lost record still cannot book twice.
+    clientReference: attemptId,
+    holder,
+    guests: [
+      {
+        occupancyNumber: 1,
+        firstName: holder.firstName,
+        lastName: holder.lastName,
+        email: holder.email,
+      },
+    ],
+    payment: { method: "TRANSACTION_ID", transactionId },
+  };
+}
+
+export type BookOutcome =
+  | { kind: "confirmed"; bookingId: string }
+  | { kind: "rejected" }
+  | { kind: "room-unavailable" }
+  | { kind: "not-authorised" }
+  | { kind: "unknown" };
+
+const invalidRequestCodes = new Set([4000, 4002, 4003, 4010]);
+const roomGoneCodes = new Set([4012, 2013]);
+
+function isLiveResponse(body: unknown): boolean {
+  try {
+    assertSandbox(body);
+    return false;
+  } catch {
+    return true;
+  }
+}
+
+export function classifyBookResponse(result: LiteapiResult | "unreachable"): BookOutcome {
+  if (result === "unreachable") return { kind: "unknown" };
+  const { status, body } = result;
+
+  if (status === 200 && !isLiveResponse(body)) {
+    const data = (body as { data?: { status?: unknown; bookingId?: unknown } } | null)?.data;
+    if (data?.status === "CONFIRMED" && typeof data.bookingId === "string" && data.bookingId) {
+      return { kind: "confirmed", bookingId: data.bookingId };
+    }
+  }
+  if (status === 401 || status === 403) return { kind: "not-authorised" };
+
+  const code = liteapiErrorCode(body);
+  // A 5xx carrying a room-gone code is not proof, so only client-error replies count.
+  if (status === 410 || (status < 500 && code !== undefined && roomGoneCodes.has(code))) {
+    return { kind: "room-unavailable" };
+  }
+  if (status === 400 && code !== undefined && invalidRequestCodes.has(code)) {
+    return { kind: "rejected" };
+  }
+  // The card is charged before the book call, so an unproven outcome must never be reported as failed.
+  return { kind: "unknown" };
+}
+
+export type HotelBooking = {
+  bookingId: string;
+  status: string;
+  hotel: { id: string; name: string };
+  checkin: string;
+  checkout: string;
+  holder: { firstName: string; lastName: string; email: string };
+  price: number;
+  currency: string;
+  cancellation: {
+    refundableTag?: string;
+    cancelPolicyInfos: { cancelTime?: string; amount?: number; currency?: string }[];
+  };
+  hotelConfirmationCode?: string;
+};
+
+const storedBookingSchema = z.looseObject({
+  data: z.looseObject({
+    bookingId: z.string().min(1),
+    status: z.string().min(1),
+    hotelConfirmationCode: optionalString,
+    hotel: z.looseObject({ hotelId: z.string().min(1), name: optionalString }),
+    checkin: z.string().min(1),
+    checkout: z.string().min(1),
+    holder: z.looseObject({
+      firstName: z.string(),
+      lastName: z.string(),
+      email: z.string(),
+    }),
+    price: z.number(),
+    currency: z.string().min(1),
+    cancellationPolicies: z
+      .looseObject({
+        refundableTag: optionalString,
+        cancelPolicyInfos: z
+          .array(
+            z.looseObject({
+              cancelTime: optionalString,
+              amount: optionalNumber,
+              currency: optionalString,
+            }),
+          )
+          .nullish(),
+      })
+      .nullish(),
+  }),
+});
+
+export function normaliseBooking(raw: unknown): HotelBooking {
+  const { data } = storedBookingSchema.parse(raw);
+  const policies = data.cancellationPolicies;
+  return {
+    bookingId: data.bookingId,
+    status: data.status,
+    hotel: { id: data.hotel.hotelId, name: data.hotel.name || "Hotel" },
+    checkin: data.checkin,
+    checkout: data.checkout,
+    holder: {
+      firstName: data.holder.firstName,
+      lastName: data.holder.lastName,
+      email: data.holder.email,
+    },
+    price: data.price,
+    currency: data.currency,
+    cancellation: {
+      refundableTag: policies?.refundableTag,
+      cancelPolicyInfos: (policies?.cancelPolicyInfos ?? []).map((info) => ({
+        cancelTime: info.cancelTime,
+        amount: info.amount,
+        currency: info.currency,
+      })),
+    },
+    hotelConfirmationCode: data.hotelConfirmationCode,
   };
 }
