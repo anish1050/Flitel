@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import Image from "next/image";
-import { ArrowRight, Hotel, Info, Star } from "lucide-react";
+import { ArrowRight, ArrowUpRight, Headphones, Hotel, Info, Star } from "lucide-react";
 import { HotelSearchForm } from "@/components/hotel-search-form";
 import { HotelsUnavailable } from "@/components/hotels-unavailable";
 import { FlightLink } from "@/components/flight-transition";
@@ -23,6 +23,60 @@ export const metadata: Metadata = { title: "Find your hotel" };
 type Params = Record<string, string | string[] | undefined>;
 
 const stayKeys = ["destination", "checkin", "checkout", "adults"];
+
+// Destinations are looked up in the shared table, so a card can never point at a place the search does not know.
+const showcase = [
+  { id: "goa", country: "India", tagline: "Wake up to the waves" },
+  { id: "dubai", country: "United Arab Emirates", tagline: "Rooms with a skyline" },
+  { id: "singapore", country: "Singapore", tagline: "Stay in the middle of it" },
+  { id: "paris", country: "France", tagline: "Where the city sleeps late" },
+] as const;
+
+function DestinationShowcase({ stay }: { stay: StayInput }) {
+  return (
+    <section id="destinations" className="destinations page-width">
+      <div className="section-heading">
+        <div>
+          <span className="eyebrow">A CHANGE OF SCENERY</span>
+          <h2>Where will you stay next?</h2>
+          <p>A few places worth booking the room for.</p>
+        </div>
+        <span className="section-caption">
+          Pick a place. We’ll find the room. <ArrowUpRight size={20} />
+        </span>
+      </div>
+      <div className="destination-grid">
+        {showcase.map((place) => {
+          const destination = findDestination(place.id);
+          if (!destination) return null;
+          return (
+            <FlightLink
+              className="destination-card"
+              key={place.id}
+              href={`/hotels?${buildStayQuery({ ...stay, destination: place.id })}`}
+            >
+              <Image
+                src={destination.heroImage}
+                alt={`${destination.label}, ${place.country}`}
+                fill
+                sizes="(max-width: 600px) 80vw, (max-width: 900px) 45vw, 25vw"
+              />
+              <span className="destination-code">{destination.countryCode}</span>
+              <div className="destination-copy">
+                <span>{place.country}</span>
+                <h3>{destination.label}</h3>
+                <p>{place.tagline}</p>
+              </div>
+              <span className="destination-arrow">
+                <ArrowUpRight size={20} />
+              </span>
+            </FlightLink>
+          );
+        })}
+      </div>
+    </section>
+  );
+}
 
 function HotelCard({ hotel, stay }: { hotel: HotelSummary; stay: StayInput }) {
   const nights = nightsBetween(stay.checkin, stay.checkout);
@@ -176,6 +230,30 @@ export default async function HotelsPage({ searchParams }: { searchParams: Promi
           </p>
         )}
         {stay && <Results stay={stay} />}
+      </div>
+
+      <DestinationShowcase stay={shownStay} />
+
+      <section className="journey-banner page-width">
+        <div>
+          <span className="eyebrow">STAY A LITTLE LONGER.</span>
+          <h2>
+            The best part of a trip?
+            <br />
+            Somewhere good to land.
+          </h2>
+          <p>Find a room that fits the way you want to rest.</p>
+          <FlightLink className="button button-dark" href="#main">
+            Find your stay <Hotel size={17} />
+          </FlightLink>
+        </div>
+        <div className="banner-art banner-art-photo" aria-hidden="true">
+          <Image src="/images/santorini-hero.png" alt="" fill sizes="(max-width: 800px) 100vw, 50vw" />
+        </div>
+      </section>
+      <div className="closing-line page-width">
+        <Headphones size={18} />
+        <span>Built around the journey, from the first search to the final check-out.</span>
       </div>
     </main>
   );

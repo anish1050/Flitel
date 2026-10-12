@@ -25,6 +25,7 @@ The server starts without a token or a database connection. Flight endpoints ret
 | `FLITEL_API_SECRET`   | Empty (open); set it in production                         | When set, only callers sending it in `X-Flitel-Internal` are served (health excepted) |
 | `SMTP_USER`, `SMTP_PASSWORD`, `SMTP_HOST` | Empty; host defaults to `smtp.gmail.com` | Sends the email codes from an ordinary mailbox (Gmail app password); no domain needed |
 | `RESEND_API_KEY`, `EMAIL_FROM` | Empty                                             | Sends the email codes through Resend; needs a verified domain |
+| `GOOGLE_CLIENT_ID`    | Empty                                                      | Google OAuth client ID; enables `POST /api/auth/google` |
 | `OTP_DEV_ECHO`        | Empty                                                      | `true` prints codes to the console instead of emailing them; local only |
 
 `src/mongodb.ts` reuses one connection pool and exposes the `flights` collection. Connections open when needed, with a three-second operation timeout. Health runs a read-only ping: it returns 200 with `mongodbConnected: true` when connected, or 503 with `status: "degraded"` and `mongodbConnected: false` when unavailable. Connection errors and URIs are not exposed. Successful searches may write temporary results to `flight_searches`; existing `flights` documents remain unchanged.
@@ -40,6 +41,7 @@ Import the [Postman collection](../docs/Flitel%20B2C%20API.postman_collection.js
 | `POST /api/flights/search?stream=true` | Newline-delimited JSON offer batches followed by completion or a safe error                 |
 | `GET /api/flights/offers/:id`          | `{ "data": <Duffel offer> }`                                                                |
 | `POST /api/flights/offers/:id/refresh` | `{ "data": <Duffel offer> }` for the same flight, or `404 OFFER_UNAVAILABLE`                |
+| `POST /api/auth/google` | Body `{ credential }` (a Google ID token); returns the same session shape as verify |
 | `POST /api/auth/otp/send`, `POST /api/auth/otp/verify` | Email code sign-in; verify returns `{ token, expiresAt, email }` |
 | `GET /api/me`, `PUT /api/me/profile`, `DELETE /api/me` | Saved contact details for the verified email; delete removes them |
 | `POST /api/bookings` (needs `Authorization: Bearer <token>`) | `{ "data": { "orderId": "ord_..." } }`, or `202 { "data": { "status": "checking" } }` when the outcome is unknown |

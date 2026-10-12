@@ -2830,3 +2830,33 @@ svg {
   outline: 2px solid var(--blue);
   outline-offset: -2px;
 }
+
+/* The hotel banner shows a photo of a place to stay where the flight banner shows a plane. */
+.banner-art-photo {
+  display: block;
+  right: 0;
+  width: 52%;
+}
+.banner-art-photo > img {
+  object-fit: cover;
+  -webkit-mask-image: linear-gradient(90deg, transparent, #000 38%);
+  mask-image: linear-gradient(90deg, transparent, #000 38%);
+}
+@media (max-width: 540px) {
+  .banner-art-photo {
+    top: auto;
+    bottom: 0;
+    right: 0;
+    width: 100%;
+    height: 46%;
+  }
+  .banner-art-photo > img {
+    -webkit-mask-image: linear-gradient(180deg, transparent, #000 45%);
+    mask-image: linear-gradient(180deg, transparent, #000 45%);
+  }
+}
+.banner-art-photo > img,
+.journey-banner:hover .banner-art-photo > img {
+  transform: none;
+  filter: none;
+}

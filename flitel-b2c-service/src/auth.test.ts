@@ -4,6 +4,12 @@ import { resetRateLimits } from "./rate-limit.js";
 import { issueSession, readSessionEmail } from "./session.js";
 import { sessionHeader } from "./test-support.js";
 
+const { verifyGoogleCredential } = vi.hoisted(() => ({ verifyGoogleCredential: vi.fn() }));
+vi.mock("./google-signin.js", () => ({
+  googleSignInConfigured: () => Boolean(process.env.GOOGLE_CLIENT_ID),
+  verifyGoogleCredential,
+}));
+
 type Doc = Record<string, any>;
 const { stores } = vi.hoisted(() => ({
   stores: new Map<string, Map<string, Doc>>(),
@@ -142,6 +148,30 @@ describe("email codes", () => {
   it("rejects malformed input", async () => {
     expect((await post("/api/auth/otp/send", { email: "nope" })).status).toBe(400);
     expect((await post("/api/auth/otp/verify", { email, code: "12" })).status).toBe(400);
+  });
+});
+
+describe("google sign-in", () => {
+  const credential = "a".repeat(40);
+
+  it("turns a verified Google token into a session", async () => {
+    vi.stubEnv("GOOGLE_CLIENT_ID", "client-id");
+    verifyGoogleCredential.mockResolvedValue(email);
+    const response = await post("/api/auth/google", { credential });
+    expect(response.status).toBe(200);
+    expect(readSessionEmail((await response.json()).data.token)).toBe(email);
+  });
+
+  it("rejects a token Google did not issue for this app", async () => {
+    vi.stubEnv("GOOGLE_CLIENT_ID", "client-id");
+    verifyGoogleCredential.mockResolvedValue(undefined);
+    const response = await post("/api/auth/google", { credential });
+    expect([response.status, await errorCode(response)]).toEqual([401, "GOOGLE_REJECTED"]);
+  });
+
+  it("is unavailable until a client id is configured", async () => {
+    vi.stubEnv("GOOGLE_CLIENT_ID", "");
+    expect((await post("/api/auth/google", { credential })).status).toBe(503);
   });
 });
 

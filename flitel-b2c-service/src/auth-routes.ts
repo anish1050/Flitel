@@ -4,6 +4,7 @@ import { randomInt, timingSafeEqual } from "node:crypto";
 import { z } from "zod";
 import { raiseApiError } from "./duffel.js";
 import { sendEmail } from "./email.js";
+import { googleSignInConfigured, verifyGoogleCredential } from "./google-signin.js";
 import { getDatabase } from "./mongodb.js";
 import { rateLimit } from "./rate-limit.js";
 import { hashEmail, hashWithSecret, issueSession, requireSession } from "./session.js";
@@ -56,13 +57,12 @@ function sameHash(a: string, b: string): boolean {
 // Mounted under /api.
 export const authRoutes = new Hono();
 
-authRoutes.use(
-  "*",
-  bodyLimit({
-    maxSize: 2048,
-    onError: () => raiseApiError(413, "REQUEST_TOO_LARGE", "The request body is too large."),
-  }),
-);
+const tooLarge = () => raiseApiError(413, "REQUEST_TOO_LARGE", "The request body is too large.");
+authRoutes.use("/auth/otp/*", bodyLimit({ maxSize: 2048, onError: tooLarge }));
+authRoutes.use("/me/*", bodyLimit({ maxSize: 2048, onError: tooLarge }));
+// A Google ID token is a signed JWT of a little over a kilobyte.
+authRoutes.use("/auth/google", bodyLimit({ maxSize: 8192, onError: tooLarge }));
+authRoutes.use("/auth/google", rateLimit("google-signin", 20, 10 * 60_000));
 authRoutes.use("/auth/otp/send", rateLimit("otp-send", 5, 10 * 60_000));
 authRoutes.use("/auth/otp/verify", rateLimit("otp-verify", 15, 10 * 60_000));
 
@@ -122,6 +122,19 @@ authRoutes.post("/auth/otp/verify", async (context) => {
     raiseApiError(400, "INVALID_CODE", "That code didn't work. Check it, or ask for a new one.");
   }
   await otps().deleteOne({ _id: id });
+  const session = issueSession(email);
+  return context.json({ data: { token: session.token, expiresAt: session.expiresAt, email } });
+});
+
+authRoutes.post("/auth/google", async (context) => {
+  if (!googleSignInConfigured()) {
+    raiseApiError(503, "GOOGLE_UNAVAILABLE", "Google sign-in isn't available right now.");
+  }
+  const parsed = z
+    .object({ credential: z.string().min(20).max(4096) })
+    .safeParse(await context.req.json().catch(() => undefined));
+  const email = parsed.success ? await verifyGoogleCredential(parsed.data.credential) : undefined;
+  if (!email) raiseApiError(401, "GOOGLE_REJECTED", "We couldn't verify that Google sign-in. Please try again.");
   const session = issueSession(email);
   return context.json({ data: { token: session.token, expiresAt: session.expiresAt, email } });
 });

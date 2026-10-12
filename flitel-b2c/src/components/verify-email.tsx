@@ -4,6 +4,7 @@ import { ShieldCheck } from "lucide-react";
 import { useEffect, useState } from "react";
 import { z } from "zod";
 import { Field } from "@/components/booking-panels";
+import { GoogleSignIn, googleClientId } from "@/components/google-sign-in";
 
 export type SavedProfile = { firstName: string; lastName: string; phone: string };
 export type Session = { email: string; profile: SavedProfile | null };
@@ -102,6 +103,12 @@ export function EmailVerification({
       },
     );
 
+  const signInWithGoogle = (credential: string) =>
+    run(
+      () => post("/api/auth/google", { credential }),
+      async () => onSession(await readSession()),
+    );
+
   async function signOut() {
     await post("/api/auth/logout", {});
     onSession(null);
@@ -155,6 +162,12 @@ export function EmailVerification({
         <span>No password needed</span>
       </div>
       <div className="itinerary-body">
+        {googleClientId && (
+          <>
+            <GoogleSignIn onCredential={(credential) => void signInWithGoogle(credential)} />
+            <p className="field-hint">or get a code by email</p>
+          </>
+        )}
         {!codeSent ? (
           <form
             noValidate
