@@ -38,6 +38,7 @@ async function requestHotels(
   path: string,
   body?: unknown,
   customUnavailable?: string,
+  notFoundMessage = "We couldn't find this booking.",
 ): Promise<unknown> {
   const unavailable = customUnavailable ?? unavailableMessage;
   if (!hasFlightBackend()) throw new Error(unavailable);
@@ -57,7 +58,7 @@ async function requestHotels(
     throw new Error(unavailable);
   }
   const answer: unknown = await response.json().catch(() => null);
-  if (response.status === 404) throw new Error("We couldn't find this booking.");
+  if (response.status === 404) throw new Error(notFoundMessage);
   // A caller-supplied message (the booking read-back) replaces the search-flavoured wording.
   if (response.status === 400 && customUnavailable === undefined)
     throw new Error("Check the stay details and try again.");
@@ -94,6 +95,19 @@ export async function fetchHotelRooms(
     stayFields(stay),
   );
   return parseData(z.object({ hotel: hotelDetailSchema, rooms: z.array(roomSchema) }), answer);
+}
+
+// Name, photo and address only: a room's offer id is not stable between rates calls.
+export async function fetchHotelDetails(hotelId: string): Promise<HotelDetail> {
+  const notFound = "This hotel could not be found.";
+  if (!hotelIdPattern.test(hotelId)) throw new Error(notFound);
+  const answer = await requestHotels(
+    `/api/hotels/${encodeURIComponent(hotelId)}`,
+    undefined,
+    undefined,
+    notFound,
+  );
+  return parseData(z.object({ hotel: hotelDetailSchema }), answer).hotel;
 }
 
 type BackendAnswer = { status: number; body: unknown };

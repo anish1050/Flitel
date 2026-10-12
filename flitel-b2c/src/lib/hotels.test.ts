@@ -1,11 +1,13 @@
 import { describe, expect, it } from "vitest";
 import {
+  buildReserveQuery,
   buildStayQuery,
   cancellationLabel,
   defaultStay,
   findDestination,
   hotelDestinations,
   nightsBetween,
+  parseReserveParams,
   parseStayParams,
   prebookSchema,
 } from "./hotels";
@@ -68,6 +70,64 @@ describe("stay query", () => {
 
   it("counts nights across a month end", () => {
     expect(nightsBetween("2026-10-30", "2026-11-02")).toBe(3);
+  });
+});
+
+describe("reserve query", () => {
+  const stay = parseStayParams(valid, today);
+  const room = {
+    offerId: "offer_abc/123=",
+    name: "Deluxe & Co Room",
+    boardName: "Breakfast",
+    refundable: true,
+    cancelBefore: "2026-10-30T00:00:00Z",
+    price: { amount: 9000.5, currency: "INR" },
+    taxesNotIncluded: [],
+  };
+  const read = (query: string) => Object.fromEntries(new URLSearchParams(query));
+
+  it("round-trips the room's display data next to the stay", () => {
+    const params = read(buildReserveQuery(stay, room));
+
+    expect(parseStayParams(params, today)).toEqual(stay);
+    expect(parseReserveParams(params)).toEqual({
+      offerId: "offer_abc/123=",
+      roomName: "Deluxe & Co Room",
+      board: "Breakfast",
+      price: 9000.5,
+      currency: "INR",
+      refundable: true,
+      cancelBefore: "2026-10-30T00:00:00Z",
+    });
+  });
+
+  it("omits board and cancelBefore when the room has none", () => {
+    const params = read(
+      buildReserveQuery(stay, { ...room, boardName: undefined, refundable: false }),
+    );
+
+    expect(parseReserveParams(params)).toEqual({
+      offerId: "offer_abc/123=",
+      roomName: "Deluxe & Co Room",
+      price: 9000.5,
+      currency: "INR",
+      refundable: false,
+    });
+  });
+
+  it("rejects missing or malformed room data", () => {
+    const good = read(buildReserveQuery(stay, room));
+    const bad = [
+      { ...good, offerId: undefined },
+      { ...good, offerId: "x" },
+      { ...good, roomName: "" },
+      { ...good, price: "abc" },
+      { ...good, price: "0" },
+      { ...good, currency: "inr" },
+      { ...good, refundable: "yes" },
+      { ...good, cancelBefore: "tomorrow" },
+    ];
+    for (const params of bad) expect(() => parseReserveParams(params)).toThrow();
   });
 });
 

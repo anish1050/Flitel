@@ -44,7 +44,7 @@ function HotelCard({ hotel, stay }: { hotel: HotelSummary; stay: StayInput }) {
                 <Star size={13} aria-hidden="true" /> {hotel.stars} star
               </span>
             )}
-            {hotel.rating !== undefined && <span>Rated {hotel.rating}</span>}
+            {hotel.rating ? <span>Rated {hotel.rating}</span> : null}
           </span>
           {hotel.address && <small>{hotel.address}</small>}
           {hotel.refundable && <span className="hotel-tag">Free cancellation</span>}

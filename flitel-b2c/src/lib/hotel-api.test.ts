@@ -3,6 +3,7 @@ vi.mock("server-only", () => ({}));
 import {
   createHotelBooking,
   fetchHotelBooking,
+  fetchHotelDetails,
   fetchHotelRooms,
   prebookRoom,
   searchHotels,
@@ -97,6 +98,34 @@ describe("hotel rooms", () => {
     const request = stubBackend(Response.json({}));
     await expect(fetchHotelRooms("../bookings", stay)).rejects.toThrow();
     expect(request).not.toHaveBeenCalled();
+  });
+});
+
+describe("hotel details", () => {
+  it("gets the hotel from the details-only endpoint without caching", async () => {
+    const request = stubBackend(
+      Response.json({ data: { hotel: { id: "lp1", name: "Sea View" } } }),
+    );
+    expect(await fetchHotelDetails("lp1")).toEqual({ id: "lp1", name: "Sea View" });
+    expect(request).toHaveBeenCalledWith(
+      `${backend}/api/hotels/lp1`,
+      expect.objectContaining({ method: "GET", cache: "no-store" }),
+    );
+  });
+
+  it("never fetches for a malformed hotel id", async () => {
+    const request = stubBackend(Response.json({}));
+    await expect(fetchHotelDetails("../bookings")).rejects.toThrow(/could not be found/);
+    expect(request).not.toHaveBeenCalled();
+  });
+
+  it("reports a 404 as a missing hotel, other failures as unavailable", async () => {
+    stubBackend(Response.json({ error: { code: "HOTEL_NOT_FOUND" } }, { status: 404 }));
+    await expect(fetchHotelDetails("lp1")).rejects.toThrow(/hotel could not be found/);
+    stubBackend(Response.json({}, { status: 502 }));
+    await expect(fetchHotelDetails("lp1")).rejects.toThrow(/unavailable right now/);
+    stubBackend(Response.json({ data: { hotel: { id: "lp1" } } }));
+    await expect(fetchHotelDetails("lp1")).rejects.toThrow(/invalid response/);
   });
 });
 

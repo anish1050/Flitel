@@ -100,6 +100,58 @@ export function buildStayQuery(stay: StayInput): string {
   }).toString();
 }
 
+// The offer id of one room changes on every rates call, so the Reserve link carries what the
+// book page shows. The price here is display-only: the prebook price stays authoritative.
+export type ReserveInput = {
+  offerId: string;
+  roomName: string;
+  board?: string;
+  price: number;
+  currency: string;
+  refundable: boolean;
+  cancelBefore?: string;
+};
+
+const reserveSchema = z.object({
+  offerId: z.string().regex(/^[A-Za-z0-9_=+/.-]{8,4000}$/),
+  roomName: z.string().min(1).max(200),
+  board: z.string().min(1).max(100).optional(),
+  price: z.number().positive().finite(),
+  currency: z.string().regex(/^[A-Z]{3}$/),
+  refundable: z.enum(["1", "0"]).transform((flag) => flag === "1"),
+  cancelBefore: z.iso.datetime().optional(),
+});
+
+export function buildReserveQuery(stay: StayInput, room: Room): string {
+  const params = new URLSearchParams(buildStayQuery(stay));
+  params.set("offerId", room.offerId);
+  params.set("roomName", room.name);
+  if (room.boardName) params.set("board", room.boardName);
+  params.set("price", String(room.price.amount));
+  params.set("currency", room.price.currency);
+  params.set("refundable", room.refundable ? "1" : "0");
+  if (room.refundable && room.cancelBefore) params.set("cancelBefore", room.cancelBefore);
+  return params.toString();
+}
+
+export function parseReserveParams(
+  params: Record<string, string | string[] | undefined>,
+): ReserveInput {
+  const text = (name: string) => (typeof params[name] === "string" ? params[name] : undefined);
+  const price = text("price");
+  const parsed = reserveSchema.safeParse({
+    offerId: text("offerId"),
+    roomName: text("roomName"),
+    board: text("board"),
+    price: price ? Number(price) : undefined,
+    currency: text("currency"),
+    refundable: text("refundable"),
+    cancelBefore: text("cancelBefore"),
+  });
+  if (!parsed.success) throw new Error("Choose a room from the hotel's list.");
+  return parsed.data;
+}
+
 // Mirrors the backend's JSON (flitel-b2c-service/src/hotels.ts).
 const priceSchema = z.object({ amount: z.number(), currency: z.string() });
 

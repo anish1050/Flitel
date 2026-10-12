@@ -7,6 +7,7 @@ import { hasFlightBackend } from "@/lib/flight-api";
 import { formatCalendarDate, formatPrice } from "@/lib/flights";
 import { fetchHotelRooms } from "@/lib/hotel-api";
 import {
+  buildReserveQuery,
   buildStayQuery,
   cancellationLabel,
   nightsBetween,
@@ -18,6 +19,8 @@ import {
 export const metadata: Metadata = { title: "Your hotel" };
 
 const maxImages = 8;
+// Mirrors maxRooms in flitel-b2c-service/src/hotels.ts.
+const backendRoomCap = 12;
 
 function RoomRow({
   room,
@@ -99,7 +102,7 @@ export default async function HotelDetails({
   const gallery = hotel.images?.length ? hotel.images : hotel.photo ? [hotel.photo] : [];
   const summary = [
     hotel.stars !== undefined ? `${hotel.stars} star` : undefined,
-    hotel.rating !== undefined ? `Rated ${hotel.rating}` : undefined,
+    hotel.rating ? `Rated ${hotel.rating}` : undefined,
     hotel.address,
   ]
     .filter(Boolean)
@@ -162,16 +165,21 @@ export default async function HotelDetails({
             </FlightLink>
           </div>
         ) : (
-          <ul className="room-list">
-            {rooms.map((room) => (
-              <RoomRow
-                key={room.offerId}
-                room={room}
-                nights={nights}
-                reserveHref={`/hotels/${encodeURIComponent(hotelId)}/book?${query}&offerId=${encodeURIComponent(room.offerId)}`}
-              />
-            ))}
-          </ul>
+          <>
+            {rooms.length === backendRoomCap && (
+              <p>Showing the best {rooms.length} room options</p>
+            )}
+            <ul className="room-list">
+              {rooms.map((room) => (
+                <RoomRow
+                  key={room.offerId}
+                  room={room}
+                  nights={nights}
+                  reserveHref={`/hotels/${encodeURIComponent(hotelId)}/book?${buildReserveQuery(stay, room)}`}
+                />
+              ))}
+            </ul>
+          </>
         )}
       </section>
     </main>
