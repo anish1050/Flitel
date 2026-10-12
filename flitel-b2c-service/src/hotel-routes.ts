@@ -35,8 +35,11 @@ import {
 } from "./liteapi.js";
 
 const hotelIdPattern = /^[A-Za-z0-9_-]{2,40}$/;
-const searchTtlMs = 60_000;
-const hotelDetailsTtlMs = 6 * 60 * 60_000;
+// Names and photos barely change; the list price is only an invitation; the room price is nearly a promise.
+// Prebook re-checks the real price before anything is charged.
+const hotelDetailsTtlMs = 24 * 60 * 60_000;
+const searchTtlMs = 3 * 60_000;
+const roomsTtlMs = 60_000;
 const isSuccess = (status: number) => status >= 200 && status < 300;
 
 // Mounted under /api.
@@ -177,7 +180,7 @@ hotelRoutes.post("/hotels/:hotelId/rates", async (context) => {
 
   const rooms = await cached(
     `rates:${hotelId}:${checkin}:${checkout}:${adults}:${currency}:${guestNationality}`,
-    searchTtlMs,
+    roomsTtlMs,
     async () => {
       // The details only enrich the page, so a failure there is never an error.
       const details = requestLiteapi(
