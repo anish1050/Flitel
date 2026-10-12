@@ -37,8 +37,9 @@ const stayFields = (stay: StayInput) => ({
 async function requestHotels(
   path: string,
   body?: unknown,
-  unavailable = unavailableMessage,
+  customUnavailable?: string,
 ): Promise<unknown> {
+  const unavailable = customUnavailable ?? unavailableMessage;
   if (!hasFlightBackend()) throw new Error(unavailable);
   let response: Response;
   try {
@@ -57,8 +58,11 @@ async function requestHotels(
   }
   const answer: unknown = await response.json().catch(() => null);
   if (response.status === 404) throw new Error("We couldn't find this booking.");
-  if (response.status === 400) throw new Error("Check the stay details and try again.");
-  if (response.status === 504) throw new Error("Hotel search took too long. Please try again.");
+  // A caller-supplied message (the booking read-back) replaces the search-flavoured wording.
+  if (response.status === 400 && customUnavailable === undefined)
+    throw new Error("Check the stay details and try again.");
+  if (response.status === 504 && customUnavailable === undefined)
+    throw new Error("Hotel search took too long. Please try again.");
   if (!response.ok) throw new Error(unavailable);
   return answer;
 }

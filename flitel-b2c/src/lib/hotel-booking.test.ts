@@ -65,6 +65,28 @@ describe("pending attempt storage", () => {
     expect(readPendingHotelAttempt(storage, pending.attemptId)).toEqual({ state: "ready", pending });
   });
 
+  it("persists exactly the pending fields, never an extra such as a secret key", () => {
+    const storage = fake();
+    const extra = { ...pending, secretKey: "sk_live", holder: { ...guest, nationality: "IN" } };
+    savePendingHotelAttempt(storage, extra);
+    const stored = JSON.parse(storage.getItem(`flitel-hotel:${pending.attemptId}`)!);
+    expect(Object.keys(stored.pending).sort()).toEqual(
+      ["attemptId", "expectedCurrency", "expectedTotal", "holder", "prebookId", "transactionId"],
+    );
+    expect(Object.keys(stored.pending.holder).sort()).toEqual(["email", "firstName", "lastName", "phone"]);
+    expect(storage.getItem(`flitel-hotel:${pending.attemptId}`)).not.toContain("sk_live");
+  });
+
+  it("removes the guest details when the checking marker cannot be written", () => {
+    const storage = fake();
+    savePendingHotelAttempt(storage, pending);
+    storage.setItem = () => {
+      throw new Error("quota");
+    };
+    markHotelAttemptChecking(storage, pending.attemptId);
+    expect(storage.getItem(`flitel-hotel:${pending.attemptId}`)).toBeNull();
+  });
+
   it("replaces the guest details with a checking marker", () => {
     const storage = fake();
     savePendingHotelAttempt(storage, pending);
@@ -135,6 +157,12 @@ describe("classifying a booking answer", () => {
     ["an HTML body", 502, null],
     ["an empty body", 200, undefined],
     ["a string body", 500, "Bad gateway"],
+    ["a 200 carrying a failure code", 200, error("BOOKING_FAILED")],
+    ["a 202 carrying a failure code", 202, error("ROOM_UNAVAILABLE")],
+    ["an inherited property name: constructor", 500, error("constructor")],
+    ["an inherited property name: toString", 500, error("toString")],
+    ["an inherited property name: __proto__", 500, error("__proto__")],
+    ["an inherited property name: hasOwnProperty", 500, error("hasOwnProperty")],
   ])("treats %s as checking", (_name, status, body) => {
     expect(classifyHotelBooking(status, body)).toEqual({ kind: "checking" });
   });

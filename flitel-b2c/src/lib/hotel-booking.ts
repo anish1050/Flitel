@@ -51,7 +51,24 @@ function writeAttempt(
 }
 
 export function savePendingHotelAttempt(storage: Storage | undefined, pending: PendingHotelAttempt) {
-  writeAttempt(storage, pending.attemptId, { state: "ready", pending });
+  const { attemptId, prebookId, transactionId, expectedTotal, expectedCurrency, holder } = pending;
+  // Picked by name so a caller's extra fields (a secretKey, say) can never reach storage.
+  writeAttempt(storage, attemptId, {
+    state: "ready",
+    pending: {
+      attemptId,
+      prebookId,
+      transactionId,
+      expectedTotal,
+      expectedCurrency,
+      holder: {
+        firstName: holder.firstName,
+        lastName: holder.lastName,
+        email: holder.email,
+        phone: holder.phone,
+      },
+    },
+  });
 }
 
 export function readPendingHotelAttempt(
@@ -69,7 +86,12 @@ export function readPendingHotelAttempt(
 }
 
 export function markHotelAttemptChecking(storage: Storage | undefined, attemptId: string) {
-  writeAttempt(storage, attemptId, { state: "checking" });
+  try {
+    storage?.setItem(attemptKey(attemptId), JSON.stringify({ state: "checking" }));
+  } catch {
+    // Guest details must not linger if the marker cannot replace them.
+    clearHotelAttempt(storage, attemptId);
+  }
 }
 
 export function clearHotelAttempt(storage: Storage | undefined, attemptId: string) {
@@ -107,7 +129,9 @@ export function classifyHotelBooking(status: number, body: unknown): HotelBookin
   if (!answer.success) return { kind: "checking" };
   const { data, error } = answer.data;
   if (status === 200 && data) return { kind: "confirmed", bookingId: data.bookingId };
-  const reason = error && failureReasons[error.code];
-  if (error && reason) return { kind: "failed", code: error.code, message: reason + refundNote };
+  // Only an error status proves a rejection; a 2xx carrying a code is not proof.
+  if (status >= 400 && error && Object.hasOwn(failureReasons, error.code)) {
+    return { kind: "failed", code: error.code, message: failureReasons[error.code] + refundNote };
+  }
   return { kind: "checking" };
 }

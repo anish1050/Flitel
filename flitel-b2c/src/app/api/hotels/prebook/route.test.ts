@@ -17,7 +17,7 @@ describe("prebook proxy", () => {
     expect(prebookRoom).not.toHaveBeenCalled();
   });
 
-  it.each(["not json", "{}", '{"offerId":42}', '{"offerId":"../x"}'])(
+  it.each(["not json", "{}", '{"offerId":42}', '{"offerId":"../../etc/passwd x"}'])(
     "rejects the body %s without forwarding",
     async (body) => {
       const response = await post(body);

@@ -183,4 +183,11 @@ describe("booking read-back", () => {
     stubBackend(Response.json({ data: { bookingId: "bk_1" } }));
     await expect(fetchHotelBooking("bk_1", ref)).rejects.toThrow(/load this booking/);
   });
+
+  it("uses the load-failed message for read-back 400 and 504, not search wording", async () => {
+    for (const status of [400, 504]) {
+      stubBackend(Response.json({ error: { code: "X", message: "x" } }, { status }));
+      await expect(fetchHotelBooking("bk_1", ref)).rejects.toThrow(/load this booking/);
+    }
+  });
 });
