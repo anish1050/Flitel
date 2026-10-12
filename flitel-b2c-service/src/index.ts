@@ -40,6 +40,7 @@ import {
 } from "./flight-search-cache.js";
 import { fetchFlightBatches } from "./flight-batches.js";
 import { findSameFlight } from "./offer-refresh.js";
+import { hotelRoutes } from "./hotel-routes.js";
 
 const app = new Hono();
 
@@ -355,6 +356,8 @@ app.get("/api/bookings/:orderId", async (context) => {
   }
   return context.json({ data: order.data });
 });
+
+app.route("/api", hotelRoutes);
 
 app.notFound(() =>
   Response.json(
