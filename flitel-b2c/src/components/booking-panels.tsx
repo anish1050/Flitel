@@ -6,7 +6,7 @@ import type { BookingDetails, TravellerInput } from "@/lib/booking";
 
 const titleLabels: Record<string, string> = { mr: "Mr", ms: "Ms", mrs: "Mrs", miss: "Miss" };
 
-function Field({ label, error, children }: { label: string; error?: string; children: ReactNode }) {
+export function Field({ label, error, children }: { label: string; error?: string; children: ReactNode }) {
   return (
     <label className="booking-field">
       <span className="field-label">{label}</span>
@@ -87,10 +87,12 @@ export function TravellerFields({
 export function ContactFields({
   contact,
   errors,
+  emailLocked = false,
   onChange,
 }: {
   contact: { email: string; phone: string };
   errors: Record<string, string>;
+  emailLocked?: boolean;
   onChange: (changes: Partial<{ email: string; phone: string }>) => void;
 }) {
   return (
@@ -103,7 +105,7 @@ export function ContactFields({
       </div>
       <div className="booking-fields">
         <Field label="Email" error={errors["contact.email"]}>
-          <input type="email" autoComplete="email" value={contact.email} aria-invalid={Boolean(errors["contact.email"])} onChange={(event) => onChange({ email: event.target.value })} />
+          <input type="email" autoComplete="email" value={contact.email} readOnly={emailLocked} aria-invalid={Boolean(errors["contact.email"])} onChange={(event) => onChange({ email: event.target.value })} />
         </Field>
         <Field label="Phone with country code" error={errors["contact.phone"]}>
           <input type="tel" autoComplete="tel" placeholder="+919876543210" value={contact.phone} aria-invalid={Boolean(errors["contact.phone"])} onChange={(event) => onChange({ phone: event.target.value })} />

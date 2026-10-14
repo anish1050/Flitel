@@ -92,11 +92,19 @@ export function isAdultOn(bornOn: string, day: string): boolean {
   return thisYear - year - (birthdayPassed ? 0 : 1) >= 18;
 }
 
-const nameSchema = z
+export const nameSchema = z
   .string()
   .trim()
   .regex(/^[A-Za-z][A-Za-z' -]{0,49}$/, "Use English letters as shown on the passport.");
 const dateSchema = z.iso.date("Enter a valid date.");
+
+export const contactSchema = z.object({
+  email: z.email("Enter a valid email address.").max(254),
+  phone: z
+    .string()
+    .trim()
+    .regex(/^\+[1-9]\d{6,14}$/, "Use the international format, for example +919876543210."),
+});
 
 export function createBookingSchema(
   documentsRequired: boolean,
@@ -127,13 +135,7 @@ export function createBookingSchema(
       )
       .min(1)
       .max(9),
-    contact: z.object({
-      email: z.email("Enter a valid email address.").max(254),
-      phone: z
-        .string()
-        .trim()
-        .regex(/^\+[1-9]\d{6,14}$/, "Use the international format, for example +919876543210."),
-    }),
+    contact: contactSchema,
   });
 }
 export type BookingDetails = z.infer<ReturnType<typeof createBookingSchema>>;

@@ -1,4 +1,5 @@
 import "server-only";
+import { backendHeaders } from "./backend-headers";
 import { z } from "zod";
 import {
   createDemoOffers,
@@ -31,6 +32,7 @@ export async function streamFlightOffers(
       {
         method: "POST",
         headers: {
+          ...(await backendHeaders()),
           Accept: "application/x-ndjson",
           "Content-Type": "application/json",
         },
@@ -72,6 +74,7 @@ async function requestFlights(
       {
         method: search ? "POST" : "GET",
         headers: {
+          ...(await backendHeaders()),
           Accept: "application/json",
           ...(search ? { "Content-Type": "application/json" } : {}),
         },
@@ -148,7 +151,7 @@ export async function refreshSupplierOffer(
   if (!/^off_[A-Za-z0-9_]+$/.test(id)) throw new Error("This fare cannot be refreshed.");
   const response = await fetch(`${backendUrl()}/api/flights/offers/${id}/refresh`, {
     method: "POST",
-    headers: { Accept: "application/json", "Content-Type": "application/json" },
+    headers: { ...(await backendHeaders()), Accept: "application/json", "Content-Type": "application/json" },
     body: JSON.stringify(search),
     cache: "no-store",
     signal: AbortSignal.timeout(25_000),
@@ -172,7 +175,7 @@ export async function createBooking(
   try {
     const response = await fetch(`${backendUrl()}/api/bookings`, {
       method: "POST",
-      headers: { Accept: "application/json", "Content-Type": "application/json" },
+      headers: { ...(await backendHeaders()), Accept: "application/json", "Content-Type": "application/json" },
       body: JSON.stringify(input),
       cache: "no-store",
       signal: AbortSignal.timeout(85_000),

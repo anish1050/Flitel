@@ -4,6 +4,7 @@ import { bodyLimit } from "hono/body-limit";
 import { cors } from "hono/cors";
 import { HTTPException } from "hono/http-exception";
 import { stream } from "hono/streaming";
+import { timingSafeEqual } from "node:crypto";
 import { getDatabase } from "./mongodb.js";
 import {
   createOfferRequest,
@@ -40,6 +41,10 @@ import {
 } from "./flight-search-cache.js";
 import { fetchFlightBatches } from "./flight-batches.js";
 import { findSameFlight } from "./offer-refresh.js";
+import { hotelRoutes } from "./hotel-routes.js";
+import { authRoutes } from "./auth-routes.js";
+import { rateLimit } from "./rate-limit.js";
+import { hashEmail, requireSession } from "./session.js";
 
 const app = new Hono();
 
@@ -58,6 +63,19 @@ app.use(
     allowHeaders: ["Content-Type"],
   }),
 );
+// Only the Next.js server may call the API, so a bot cannot walk around the web app's protections.
+app.use("/api/*", async (context, next) => {
+  const secret = process.env.FLITEL_API_SECRET?.trim();
+  if (secret && context.req.path !== "/api/health") {
+    const given = Buffer.from(context.req.header("x-flitel-internal") ?? "");
+    const expected = Buffer.from(secret);
+    if (given.length !== expected.length || !timingSafeEqual(given, expected))
+      raiseApiError(403, "FORBIDDEN", "This request is not allowed.");
+  }
+  await next();
+});
+app.use("/api/flights/*", rateLimit("flights", 40, 60_000));
+app.use("/api/bookings", rateLimit("flight-booking", 10, 10 * 60_000));
 app.use(
   "/api/flights/*",
   bodyLimit({
@@ -276,6 +294,7 @@ function bookingsUnavailable(): never {
 }
 
 app.post("/api/bookings", async (context) => {
+  const owner = hashEmail(requireSession(context));
   const parsed = bookingRequestSchema.safeParse(
     await context.req.json().catch(() => undefined),
   );
@@ -308,6 +327,7 @@ app.post("/api/bookings", async (context) => {
     offerId: offer.id,
     amount: offer.total_amount,
     currency: offer.total_currency,
+    ownerHash: owner,
   }).catch(bookingsUnavailable);
   if (claimedElsewhere) return replayBooking(context, claimedElsewhere);
 
@@ -355,6 +375,9 @@ app.get("/api/bookings/:orderId", async (context) => {
   }
   return context.json({ data: order.data });
 });
+
+app.route("/api", hotelRoutes);
+app.route("/api", authRoutes);
 
 app.notFound(() =>
   Response.json(

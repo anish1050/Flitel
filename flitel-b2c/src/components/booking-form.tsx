@@ -28,6 +28,7 @@ import {
   type BookingInput,
 } from "@/lib/booking";
 import { formatPrice, type FlightSearch } from "@/lib/flights";
+import { EmailVerification, saveProfile, useSession } from "@/components/verify-email";
 
 const latestPriceSchema = z.object({
   data: z.object({ totalAmount: z.string(), currency: z.string() }),
@@ -72,6 +73,8 @@ export function BookingForm({
   const [busy, setBusy] = useState(false);
   const [acceptedRules, setAcceptedRules] = useState(false);
   const [attemptId, setAttemptId] = useState("");
+  const [session, setSession] = useSession();
+  const [saveDetails, setSaveDetails] = useState(false);
   const submitting = useRef(false);
   // True once a Confirm has swapped in a fresh fare, so a second rejection is final.
   const confirmRefreshedFare = useRef(false);
@@ -91,6 +94,20 @@ export function BookingForm({
     setAttemptId(pending);
     setStep("checking");
   }, [offer.id]);
+
+  // Once the email is verified it is the booking contact, and a saved profile fills the rest.
+  useEffect(() => {
+    if (!session) return;
+    setInput((current) => ({
+      ...current,
+      contact: { email: session.email, phone: current.contact.phone || session.profile?.phone || "" },
+      travellers: current.travellers.map((traveller, index) =>
+        index === 0 && session.profile && !traveller.givenName && !traveller.familyName
+          ? { ...traveller, givenName: session.profile.firstName, familyName: session.profile.lastName }
+          : traveller,
+      ),
+    }));
+  }, [session]);
 
   function updateTraveller(index: number, changes: Partial<BookingInput["travellers"][number]>) {
     setInput((current) => ({
@@ -224,7 +241,23 @@ export function BookingForm({
     }).catch(() => undefined);
     const answer = bookingAnswerSchema.safeParse(await response?.json().catch(() => null));
     const orderId = answer.data?.data?.orderId;
+    if (response?.status === 401) {
+      // Turned away at the gate, so nothing was booked and the same attempt can go again.
+      clearPendingAttempt(browserStorage(), offer.id);
+      submitting.current = false;
+      setBusy(false);
+      setSession(null);
+      setStep("edit");
+      setProblem({
+        message: "Your email verification has expired. Please verify again. Nothing was booked.",
+        searchAgain: false,
+      });
+      return;
+    }
     if (response?.status === 200 && orderId) {
+      const lead = details.travellers[0];
+      if (saveDetails && lead)
+        void saveProfile({ firstName: lead.givenName, lastName: lead.familyName, phone: details.contact.phone });
       // Replace, so browser Back cannot return to a filled form and book the same trip twice.
       router.replace(`/bookings/${encodeURIComponent(orderId)}`);
       return;
@@ -281,11 +314,20 @@ export function BookingForm({
             <ContactFields
               contact={input.contact}
               errors={errors}
+              emailLocked={Boolean(session)}
               onChange={(changes) =>
                 setInput((current) => ({ ...current, contact: { ...current.contact, ...changes } }))
               }
             />
           </form>
+        )}
+        {step === "edit" && (
+          <EmailVerification
+            session={session}
+            onSession={setSession}
+            saveDetails={saveDetails}
+            onSaveDetailsChange={setSaveDetails}
+          />
         )}
         {step === "review" && details && (
           <ReviewPanels
@@ -328,9 +370,19 @@ export function BookingForm({
           </div>
         )}
         {step === "edit" && (
-          <button type="submit" form="booking-form" className="button button-blue full-width" disabled={busy}>
-            {busy ? "Checking the fare…" : "Review and confirm"}
-          </button>
+          <>
+            <button
+              type="submit"
+              form="booking-form"
+              className="button button-blue full-width"
+              disabled={busy || !session}
+            >
+              {busy ? "Checking the fare…" : "Review and confirm"}
+            </button>
+            {!session && session !== undefined && (
+              <p className="field-hint">Verify your email below to continue.</p>
+            )}
+          </>
         )}
         {step === "review" && (
           <>

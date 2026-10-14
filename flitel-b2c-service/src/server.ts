@@ -8,7 +8,7 @@ if (!Number.isInteger(port) || port < 1 || port > 65535) {
 }
 
 const server = serve({ fetch: app.fetch, hostname: "127.0.0.1", port }, () => {
-  console.log(`Flitel B2C API is running at http://127.0.0.1:${port}`);
+  console.log(`TripKnot B2C API is running at http://127.0.0.1:${port}`);
 });
 
 process.on("SIGINT", () => server.close());

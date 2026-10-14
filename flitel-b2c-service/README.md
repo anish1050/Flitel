@@ -18,8 +18,15 @@ The server starts without a token or a database connection. Flight endpoints ret
 | `PORT`                | `3001`                                                     | Local server port               |
 | `FRONTEND_ORIGIN`     | `http://127.0.0.1:3000`                                    | Single permitted browser origin |
 | `DUFFEL_ACCESS_TOKEN` | Empty                                                      | Duffel test token, backend only |
+| `LITEAPI_KEY`         | Empty                                                      | LiteAPI sandbox key, backend only |
 | `MONGODB_URI`         | Required; local template uses `mongodb://localhost:27017/` | Server-side database connection |
 | `MONGODB_DBNAME`      | `flitel`                                                   | Database name                   |
+| `SESSION_SECRET`      | Required for booking; 32+ random characters                | Signs email sign-in tokens      |
+| `FLITEL_API_SECRET`   | Empty (open); set it in production                         | When set, only callers sending it in `X-Flitel-Internal` are served (health excepted) |
+| `SMTP_USER`, `SMTP_PASSWORD`, `SMTP_HOST` | Empty; host defaults to `smtp.gmail.com` | Sends the email codes from an ordinary mailbox (Gmail app password); no domain needed |
+| `RESEND_API_KEY`, `EMAIL_FROM` | Empty                                             | Sends the email codes through Resend; needs a verified domain |
+| `GOOGLE_CLIENT_ID`    | Empty                                                      | Google OAuth client ID; enables `POST /api/auth/google` |
+| `OTP_DEV_ECHO`        | Empty                                                      | `true` prints codes to the console instead of emailing them; local only |
 
 `src/mongodb.ts` reuses one connection pool and exposes the `flights` collection. Connections open when needed, with a three-second operation timeout. Health runs a read-only ping: it returns 200 with `mongodbConnected: true` when connected, or 503 with `status: "degraded"` and `mongodbConnected: false` when unavailable. Connection errors and URIs are not exposed. Successful searches may write temporary results to `flight_searches`; existing `flights` documents remain unchanged.
 
@@ -34,8 +41,16 @@ Import the [Postman collection](../docs/Flitel%20B2C%20API.postman_collection.js
 | `POST /api/flights/search?stream=true` | Newline-delimited JSON offer batches followed by completion or a safe error                 |
 | `GET /api/flights/offers/:id`          | `{ "data": <Duffel offer> }`                                                                |
 | `POST /api/flights/offers/:id/refresh` | `{ "data": <Duffel offer> }` for the same flight, or `404 OFFER_UNAVAILABLE`                |
-| `POST /api/bookings`                   | `{ "data": { "orderId": "ord_..." } }`, or `202 { "data": { "status": "checking" } }` when the outcome is unknown |
+| `POST /api/auth/google` | Body `{ credential }` (a Google ID token); returns the same session shape as verify |
+| `POST /api/auth/otp/send`, `POST /api/auth/otp/verify` | Email code sign-in; verify returns `{ token, expiresAt, email }` |
+| `GET /api/me`, `PUT /api/me/profile`, `DELETE /api/me` | Saved contact details for the verified email; delete removes them |
+| `POST /api/bookings` (needs `Authorization: Bearer <token>`) | `{ "data": { "orderId": "ord_..." } }`, or `202 { "data": { "status": "checking" } }` when the outcome is unknown |
 | `GET /api/bookings/:orderId`           | `{ "data": <Duffel order> }`                                                                |
+| `POST /api/hotels/search`              | `{ "data": { "hotels": [...] } }`, cheapest sandbox rate per hotel                          |
+| `POST /api/hotels/:hotelId/rates`      | `{ "data": { "hotel": {...}, "rooms": [...] } }`                                            |
+| `POST /api/hotels/prebook`             | `{ "data": { "prebookId", "transactionId", "secretKey", "price", ... } }`, or `410 OFFER_UNAVAILABLE` |
+| `POST /api/hotel-bookings`             | `{ "data": { "bookingId": "..." } }`, or `202 { "data": { "status": "checking" } }` when the outcome is unknown |
+| `GET /api/hotel-bookings/:bookingId?ref=<attemptId>` | `{ "data": <booking, no phone> }` only when its `clientReference` equals `ref`, otherwise `404 BOOKING_NOT_FOUND` |
 
 `POST /api/flights/offers/:id/refresh` takes the search body, runs a fresh uncached search and returns the offer for the same flight (same carrier, flight number and departure times; same fare brand when available, else the cheapest) so an unavailable fare can be replaced.
 
@@ -62,6 +77,12 @@ Refresh the selected offer using its ID. An expired or unavailable offer returns
 Booking accepts `{ attemptId, offerId, expectedTotal, expectedCurrency, travellers, contact }`. `attemptId` is a UUID that the client creates per confirm attempt. Repeating it never books twice; the recorded result is returned instead. The order is paid from the Duffel test balance using the amount of the offer the server has just fetched. `expectedTotal` only detects price changes (`409 PRICE_CHANGED`). A timeout, 5xx or unreadable Duffel reply returns `202 checking`, because seats may have been booked. Attempts are stored in `booking_attempts` without traveller details.
 
 Errors use `{ "error": { "code": "...", "message": "..." } }`. Invalid local input returns 400, oversized requests 413, supplier-rejected searches 422, supplier/configuration outages 502/503 and timeouts 504. Upstream response bodies and credentials are not exposed. Flight responses use `Cache-Control: no-store`.
+
+## Hotels
+
+Hotel search, rooms, prebook and booking use the LiteAPI **sandbox** only (`LITEAPI_KEY`, server side); a response whose `sandbox` flag is present and not `true` is refused. `POST /api/hotels/prebook` fixes the price and returns the `transactionId` and `secretKey` for LiteAPI's payment form. That form charges the card before `POST /api/hotel-bookings` is called, and Flitel never sees card data.
+
+Booking is once-only per prebook: the attempt is claimed in `booking_attempts` under `_id` `hotel:<prebookId>` before the book call (its `offerId` field holds the prebook id, `orderId` the booking id, `clientReference` the client's attemptId so an unclear attempt can be reconciled by hand), so a second `attemptId` for the same prebook replays the first result. The `attemptId` is sent as LiteAPI's `clientReference`, and the booking can only be read back with it (`?ref=`). Only a `CONFIRMED` reply or an explicit rejection (invalid request, room unavailable, not authorised) is recorded as such. Anything else, including timeouts and 5xx, is `unknown` and answers `202 checking`, and a repeat never calls LiteAPI again. Guest details are never stored or logged.
 
 ## Progressive search and cache
 
@@ -98,3 +119,7 @@ For Vercel, select this folder as the project root and Node.js 24. `src/index.ts
 This phase supports test flight search, temporary search caching, offer details, and test bookings. `POST /api/bookings` is paid from the Duffel test balance and books once per `attemptId` through `booking_attempts`; `GET /api/bookings/:orderId` reads a booking back. Supplier searches have a 10-second deadline within a 20-second HTTP timeout; batch polling is capped at 23 seconds overall. Card and live payments, login and webhooks are not yet built. Before a public launch, configure deployment access/rate controls and complete the live-booking flow; CORS is not authentication.
 
 Supplier contracts: [offer requests](https://duffel.com/docs/api/offer-requests), [batch offer requests](https://duffel.com/docs/api/batch-offer-requests), [offers](https://duffel.com/docs/api/offers).
+
+## Abuse protection
+
+Browsing is anonymous, so every route is rate-limited per visitor address (taken from `X-Client-IP`, which the web app sets; trusted only behind `FLITEL_API_SECRET`). Booking, hotel prebook and hotel booking also require the signed email session. Limits live in process memory, so run one instance or move them to MongoDB before scaling out.

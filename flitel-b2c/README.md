@@ -39,10 +39,21 @@ Each supplier total already includes every requested adult and both journeys for
 
 ## Current scope
 
-Search supports adult passengers, one-way and round-trip travel, the ten existing airport choices, dates and economy/business cabin class. Results support stops and airline filters and price/duration sorting. Price sorting is disabled when offers use different currencies. Test offers cannot be booked.
+Search supports adult passengers, one-way and round-trip travel, the ten existing airport choices, dates and economy/business cabin class. Results support stops and airline filters and price/duration sorting. Price sorting is disabled when offers use different currencies. With the backend connected, a test offer can be booked end to end: traveller details, review, confirmation (Duffel test mode, no real ticket). If a fare becomes unavailable, the page looks for the same flight again and shows the refreshed fare.
 
 When `FLITEL_API_URL` is absent, the original five sample offers remain available for UI development. Those sample fares are per adult and include an indicative return price, without a selected return flight.
 
-This version does not reserve seats, collect payments, authenticate customers or store personal details. Live-mode offers are rejected. Supplier access can only be verified after a Duffel test token is configured in the backend.
+## Hotels
+
+`/hotels` searches hotels, `/hotels/[hotelId]` lists rooms, and `/hotels/[hotelId]/book` collects the lead guest's details and shows LiteAPI's embedded card form. After payment LiteAPI returns the customer to `/hotels/complete`, which confirms the booking and redirects to `/hotel-bookings/[bookingId]?ref=…`.
+
+- Needs the backend with `LITEAPI_KEY` set (LiteAPI **sandbox** key). Without it the pages say hotels are not available yet.
+- Card details go straight to LiteAPI's form; Flitel never receives them.
+- The card is charged before the booking call. If the answer is unclear the page says "We're checking your booking", keeps the guest details in this browser tab only, and offers "Check again", which is safe to repeat because the backend books each payment once.
+- Test card in the sandbox: 4242 4242 4242 4242, any CVV, any future expiry.
+
+## Not included yet
+
+No customer accounts, saved details, emails, cancellations or "My bookings". Flights and hotels run in supplier test/sandbox mode only; live-mode responses are rejected. Supplier behaviour can only be verified after a Duffel test token and a LiteAPI sandbox key are configured in the backend.
 
 Images and licenses are documented in public/images/SOURCES.md. The two user videos are references only and are not distributed with the app.
